@@ -292,6 +292,27 @@ export default function AdminPage() {
     );
   }
 
+  async function deleteRejectedOrder(orderId: string) {
+    const confirmed = confirm(
+      "Delete this rejected order permanently? This cannot be undone."
+    );
+
+    if (!confirmed) return;
+
+    const { error } = await supabase
+      .from("orders")
+      .delete()
+      .eq("id", orderId)
+      .eq("status", "rejected");
+
+    if (error) {
+      alert(error.message);
+      return;
+    }
+
+    setOrders((prev) => prev.filter((order) => order.id !== orderId));
+  }
+
   async function updateCredits(userId: string, credits: number) {
     const { error } = await supabase
       .from("profiles")
@@ -444,6 +465,7 @@ export default function AdminPage() {
 
   const completedOrders = orders.filter((order) => order.status === "completed");
   const archivedOrders = orders.filter((order) => order.admin_archived === true);
+  const rejectedOrders = orders.filter((order) => order.status === "rejected");
 
   const selectedProfile = profiles.find(
     (profile) => profile.id === selectedProfileId
@@ -466,7 +488,7 @@ export default function AdminPage() {
   return (
     <PageShell
       title="Admin Panel"
-      subtitle="Assign orders, review requests, manage credits, and view completed boost history."
+      subtitle="Assign orders, review requests, manage credits, delete rejected orders, and view completed boost history."
       rightAction={
         <button
           onClick={logout}
@@ -476,15 +498,19 @@ export default function AdminPage() {
         </button>
       }
     >
-      <div className="grid gap-4 md:grid-cols-5">
+      <div className="grid gap-4 md:grid-cols-6">
         <StatCard label="Users" value={profiles.length} />
         <StatCard label="Active Orders" value={activeOrders.length} />
         <StatCard label="Requests" value={requests.length} />
         <StatCard label="Completed" value={completedOrders.length} />
+        <StatCard label="Rejected" value={rejectedOrders.length} danger />
         <StatCard label="Archived" value={archivedOrders.length} highlight />
       </div>
 
-      <Panel title="Assign New Order" subtitle="Create a new active order and assign it to a normal user.">
+      <Panel
+        title="Assign New Order"
+        subtitle="Create a new active order and assign it to a normal user."
+      >
         <form onSubmit={assignOrder} className="mt-5 grid gap-4">
           <div className="grid gap-4 md:grid-cols-2">
             <select
@@ -513,6 +539,8 @@ export default function AdminPage() {
               <option>Team Strategy Help</option>
               <option>Rank Boost</option>
               <option>Trophy Boost</option>
+              <option>Prestige Icon</option>
+              <option>Brawlers Rank</option>
               <option>Custom Request</option>
             </select>
           </div>
@@ -520,14 +548,14 @@ export default function AdminPage() {
           <div className="grid gap-4 md:grid-cols-2">
             <input
               className="rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
-              placeholder="Current rank"
+              placeholder="Current rank / current value"
               value={currentRank}
               onChange={(e) => setCurrentRank(e.target.value)}
             />
 
             <input
               className="rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
-              placeholder="Target rank"
+              placeholder="Target rank / target value"
               value={targetRank}
               onChange={(e) => setTargetRank(e.target.value)}
             />
@@ -575,7 +603,9 @@ export default function AdminPage() {
                 <div className="flex flex-col justify-between gap-5 md:flex-row">
                   <div>
                     <div className="flex flex-wrap items-center gap-3">
-                      <p className="text-lg font-bold">{request.service_type}</p>
+                      <p className="text-lg font-bold">
+                        {request.service_type}
+                      </p>
                       <StatusBadge status={request.status} />
                     </div>
 
@@ -609,12 +639,14 @@ export default function AdminPage() {
                     active={request.status === "pending"}
                     onClick={() => updateRequestStatus(request.id, "pending")}
                   />
+
                   <RequestButton
                     label="accept"
                     active={request.status === "accepted"}
                     onClick={() => updateRequestStatus(request.id, "accepted")}
                     variant="green"
                   />
+
                   <RequestButton
                     label="reject"
                     active={request.status === "rejected"}
@@ -636,7 +668,10 @@ export default function AdminPage() {
         </div>
       </Panel>
 
-      <Panel title="Users & Credits" subtitle="Search users, update credits, and view each user's boost history.">
+      <Panel
+        title="Users & Credits"
+        subtitle="Search users, update credits, and view each user's boost history."
+      >
         <input
           className="mt-5 w-full rounded-xl bg-zinc-800 p-3 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
           placeholder="Search user by email..."
@@ -645,7 +680,9 @@ export default function AdminPage() {
         />
 
         <div className="mt-5 grid gap-4">
-          {filteredProfiles.length === 0 && <EmptyState text="No users found." />}
+          {filteredProfiles.length === 0 && (
+            <EmptyState text="No users found." />
+          )}
 
           {filteredProfiles.map((profile) => (
             <div
@@ -690,7 +727,7 @@ export default function AdminPage() {
       {selectedProfile && (
         <Panel
           title={`Profile History: ${selectedProfile.email}`}
-          subtitle="Admin view of this user's active, completed, and archived orders."
+          subtitle="Admin view of this user's active, completed, rejected, and archived orders."
         >
           <button
             onClick={() => setSelectedProfileId("")}
@@ -717,6 +754,7 @@ export default function AdminPage() {
                 updateStatus={updateStatus}
                 archiveCompletedOrder={archiveCompletedOrder}
                 restoreArchivedOrder={restoreArchivedOrder}
+                deleteRejectedOrder={deleteRejectedOrder}
                 formatDate={formatDate}
                 showArchiveControls
               />
@@ -727,7 +765,7 @@ export default function AdminPage() {
 
       <Panel
         title="Active Orders"
-        subtitle="Search, filter, update status, chat, and remove completed orders from the active admin list."
+        subtitle="Search, filter, update status, chat, archive completed orders, and delete rejected orders."
       >
         <div className="mt-5 grid gap-4 md:grid-cols-2">
           <input
@@ -773,6 +811,7 @@ export default function AdminPage() {
                 updateStatus={updateStatus}
                 archiveCompletedOrder={archiveCompletedOrder}
                 restoreArchivedOrder={restoreArchivedOrder}
+                deleteRejectedOrder={deleteRejectedOrder}
                 formatDate={formatDate}
                 showArchiveControls
               />
@@ -788,17 +827,23 @@ function StatCard({
   label,
   value,
   highlight = false,
+  danger = false,
 }: {
   label: string;
   value: number;
   highlight?: boolean;
+  danger?: boolean;
 }) {
   return (
     <div className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-6">
       <p className="text-sm text-zinc-400">{label}</p>
       <h2
         className={`mt-2 text-4xl font-bold ${
-          highlight ? "text-yellow-400" : "text-white"
+          danger
+            ? "text-red-400"
+            : highlight
+            ? "text-yellow-400"
+            : "text-white"
         }`}
       >
         {value}
@@ -917,6 +962,7 @@ function OrderCard({
   updateStatus,
   archiveCompletedOrder,
   restoreArchivedOrder,
+  deleteRejectedOrder,
   formatDate,
   showArchiveControls,
 }: {
@@ -930,6 +976,7 @@ function OrderCard({
   updateStatus: (orderId: string, status: string) => Promise<void>;
   archiveCompletedOrder: (orderId: string) => Promise<void>;
   restoreArchivedOrder: (orderId: string) => Promise<void>;
+  deleteRejectedOrder: (orderId: string) => Promise<void>;
   formatDate: (date: string | null) => string;
   showArchiveControls?: boolean;
 }) {
@@ -995,14 +1042,16 @@ function OrderCard({
           </button>
         ))}
 
-        {showArchiveControls && order.status === "completed" && !order.admin_archived && (
-          <button
-            onClick={() => archiveCompletedOrder(order.id)}
-            className="rounded-xl bg-red-500 px-3 py-2 text-sm font-bold text-white hover:bg-red-400"
-          >
-            Remove from Active
-          </button>
-        )}
+        {showArchiveControls &&
+          order.status === "completed" &&
+          !order.admin_archived && (
+            <button
+              onClick={() => archiveCompletedOrder(order.id)}
+              className="rounded-xl bg-red-500 px-3 py-2 text-sm font-bold text-white hover:bg-red-400"
+            >
+              Remove from Active
+            </button>
+          )}
 
         {showArchiveControls && order.admin_archived && (
           <button
@@ -1010,6 +1059,15 @@ function OrderCard({
             className="rounded-xl bg-blue-500 px-3 py-2 text-sm font-bold text-white hover:bg-blue-400"
           >
             Restore to Active
+          </button>
+        )}
+
+        {showArchiveControls && order.status === "rejected" && (
+          <button
+            onClick={() => deleteRejectedOrder(order.id)}
+            className="rounded-xl bg-red-700 px-3 py-2 text-sm font-bold text-white hover:bg-red-600"
+          >
+            Delete Rejected
           </button>
         )}
       </div>
