@@ -1,4 +1,4 @@
-import MarketplacePage from "@/components/MarketplacePage";
+import MarketplacePage from "../../components/MarketplacePage";
 
 export default function AccountsPage() {
   return (
