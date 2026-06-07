@@ -1,5 +1,5 @@
 "use client";
-
+import AdminProductManager from "../../components/AdminProductManager";
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
@@ -668,6 +668,8 @@ export default function AdminPage() {
         </div>
       </Panel>
 
+      <AdminProductManager />
+      
       <Panel
         title="Users & Credits"
         subtitle="Search users, update credits, and view each user's boost history."

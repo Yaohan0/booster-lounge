@@ -5,25 +5,31 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabaseClient";
 
+type ProductCategory = "accounts" | "pins" | "offers";
+
 type Product = {
   id: string;
-  category: string;
+  category: ProductCategory;
   title: string;
   description: string | null;
   price: number | null;
   tags: string[] | null;
   image_url: string | null;
+  video_url: string | null;
+  rank_icon_url: string | null;
   delivery_time: string | null;
+  is_active: boolean | null;
+  created_at?: string;
 };
 
 type MarketplacePageProps = {
-  category: "accounts" | "pins";
+  category: ProductCategory;
   title: string;
   subtitle: string;
   searchPlaceholder: string;
 };
 
-const popularSearches = {
+const popularSearches: Record<ProductCategory, string[]> = {
   accounts: [
     "100K",
     "Masters",
@@ -43,6 +49,27 @@ const popularSearches = {
     "Cosmetic",
     "Pin Pack",
   ],
+  offers: [
+    "Rank Boost",
+    "Coaching",
+    "Bundle",
+    "Limited",
+    "Discount",
+    "Pins",
+    "Starter",
+  ],
+};
+
+const categoryLabels: Record<ProductCategory, string> = {
+  accounts: "Account Purchase",
+  pins: "Exclusive Pins",
+  offers: "Special Offer",
+};
+
+const categoryIcons: Record<ProductCategory, string> = {
+  accounts: "🎮",
+  pins: "📌",
+  offers: "🔥",
 };
 
 export default function MarketplacePage({
@@ -58,6 +85,10 @@ export default function MarketplacePage({
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState("recommended");
   const [loading, setLoading] = useState(true);
+
+  const [minPrice, setMinPrice] = useState("");
+  const [maxPrice, setMaxPrice] = useState("");
+  const [quickPrice, setQuickPrice] = useState("");
 
   useEffect(() => {
     async function loadProducts() {
@@ -76,12 +107,29 @@ export default function MarketplacePage({
         return;
       }
 
-      setProducts(data ?? []);
+      setProducts((data ?? []) as Product[]);
       setLoading(false);
     }
 
     loadProducts();
   }, [category, supabase]);
+
+  function matchesPrice(product: Product) {
+    const price = Number(product.price ?? 0);
+
+    if (quickPrice === "0-70") return price >= 0 && price <= 70;
+    if (quickPrice === "70-200") return price > 70 && price <= 200;
+    if (quickPrice === "200-400") return price > 200 && price <= 400;
+    if (quickPrice === "400+") return price > 400;
+
+    const min = minPrice ? Number(minPrice) : null;
+    const max = maxPrice ? Number(maxPrice) : null;
+
+    if (min !== null && price < min) return false;
+    if (max !== null && price > max) return false;
+
+    return true;
+  }
 
   async function requestProduct(product: Product) {
     const {
@@ -98,6 +146,9 @@ export default function MarketplacePage({
       `Category: ${category}`,
       `Price: SGD${Number(product.price ?? 0).toFixed(2)}`,
       `Delivery: ${product.delivery_time || "Manual review"}`,
+      `Image URL: ${product.image_url || "N/A"}`,
+      `Video URL: ${product.video_url || "N/A"}`,
+      `Rank Icon URL: ${product.rank_icon_url || "N/A"}`,
       "",
       "Description:",
       product.description || "N/A",
@@ -108,7 +159,7 @@ export default function MarketplacePage({
 
     const { error } = await supabase.from("order_requests").insert({
       user_id: user.id,
-      service_type: category === "accounts" ? "Account Purchase" : "Exclusive Pins",
+      service_type: categoryLabels[category],
       current_rank: product.title,
       target_rank: `SGD${Number(product.price ?? 0).toFixed(2)}`,
       notes,
@@ -131,11 +182,12 @@ export default function MarketplacePage({
         product.description,
         product.tags?.join(" "),
         product.price?.toString(),
+        product.delivery_time,
       ]
         .join(" ")
         .toLowerCase();
 
-      return text.includes(search.toLowerCase());
+      return text.includes(search.toLowerCase()) && matchesPrice(product);
     })
     .sort((a, b) => {
       if (sort === "lowest") {
@@ -159,30 +211,46 @@ export default function MarketplacePage({
 
           <div className="hidden items-center gap-6 text-sm text-zinc-300 md:flex">
             <Link href="/services" className="hover:text-white">
-              Boosting
+              Services
             </Link>
+
             <Link
               href="/accounts"
-              className={category === "accounts" ? "text-yellow-300" : "hover:text-white"}
+              className={
+                category === "accounts" ? "text-yellow-300" : "hover:text-white"
+              }
             >
               Accounts
             </Link>
+
             <Link
               href="/pins"
-              className={category === "pins" ? "text-yellow-300" : "hover:text-white"}
+              className={
+                category === "pins" ? "text-yellow-300" : "hover:text-white"
+              }
             >
-              Exclusive Pins
+              Pins
             </Link>
+
+            <Link
+              href="/offers"
+              className={
+                category === "offers" ? "text-yellow-300" : "hover:text-white"
+              }
+            >
+              Offers
+            </Link>
+
             <Link href="/dashboard" className="hover:text-white">
               Dashboard
             </Link>
           </div>
 
           <Link
-            href="/login"
+            href="/dashboard"
             className="rounded-xl bg-yellow-400 px-4 py-2 text-sm font-bold text-black hover:bg-yellow-300"
           >
-            Login
+            My Dashboard
           </Link>
         </div>
       </nav>
@@ -199,20 +267,47 @@ export default function MarketplacePage({
 
               <div className="mt-4 grid grid-cols-2 gap-3">
                 <input
-                  className="rounded-xl bg-zinc-800 p-3 text-sm outline-none"
+                  className="rounded-xl bg-zinc-800 p-3 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
                   placeholder="Min."
+                  value={minPrice}
+                  onChange={(e) => {
+                    setMinPrice(e.target.value);
+                    setQuickPrice("");
+                  }}
                 />
+
                 <input
-                  className="rounded-xl bg-zinc-800 p-3 text-sm outline-none"
+                  className="rounded-xl bg-zinc-800 p-3 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
                   placeholder="Max."
+                  value={maxPrice}
+                  onChange={(e) => {
+                    setMaxPrice(e.target.value);
+                    setQuickPrice("");
+                  }}
                 />
               </div>
 
               <div className="mt-5 space-y-3 text-sm text-zinc-300">
-                <FilterText text="SGD0 - SGD70" />
-                <FilterText text="SGD70 - SGD200" />
-                <FilterText text="SGD200 - SGD400" />
-                <FilterText text="SGD400+" />
+                <FilterButton
+                  text="SGD0 - SGD70"
+                  active={quickPrice === "0-70"}
+                  onClick={() => setQuickPrice("0-70")}
+                />
+                <FilterButton
+                  text="SGD70 - SGD200"
+                  active={quickPrice === "70-200"}
+                  onClick={() => setQuickPrice("70-200")}
+                />
+                <FilterButton
+                  text="SGD200 - SGD400"
+                  active={quickPrice === "200-400"}
+                  onClick={() => setQuickPrice("200-400")}
+                />
+                <FilterButton
+                  text="SGD400+"
+                  active={quickPrice === "400+"}
+                  onClick={() => setQuickPrice("400+")}
+                />
               </div>
             </div>
 
@@ -220,23 +315,59 @@ export default function MarketplacePage({
               <h3 className="font-bold">Delivery Time</h3>
 
               <div className="mt-5 space-y-3 text-sm text-zinc-300">
-                <FilterText text="Manual review" />
-                <FilterText text="Instant after approval" />
-                <FilterText text="1 day" />
+                <FilterButton
+                  text="Manual review"
+                  active={search === "Manual review"}
+                  onClick={() => setSearch("Manual review")}
+                />
+                <FilterButton
+                  text="Instant after approval"
+                  active={search === "Instant after approval"}
+                  onClick={() => setSearch("Instant after approval")}
+                />
+                <FilterButton
+                  text="1 day"
+                  active={search === "1 day"}
+                  onClick={() => setSearch("1 day")}
+                />
               </div>
             </div>
 
             <div className="mt-8 border-t border-zinc-800 pt-6">
               <h3 className="font-bold">
-                {category === "accounts" ? "Rank" : "Pin Type"}
+                {category === "accounts"
+                  ? "Rank / Account"
+                  : category === "pins"
+                  ? "Pin Type"
+                  : "Offer Type"}
               </h3>
 
               <input
-                className="mt-4 w-full rounded-xl bg-zinc-800 p-3 text-sm outline-none"
-                placeholder={category === "accounts" ? "Search rank" : "Search pin"}
+                className="mt-4 w-full rounded-xl bg-zinc-800 p-3 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
+                placeholder={
+                  category === "accounts"
+                    ? "Search rank/account"
+                    : category === "pins"
+                    ? "Search pin"
+                    : "Search offer"
+                }
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
+
+              {(search || quickPrice || minPrice || maxPrice) && (
+                <button
+                  onClick={() => {
+                    setSearch("");
+                    setQuickPrice("");
+                    setMinPrice("");
+                    setMaxPrice("");
+                  }}
+                  className="mt-4 w-full rounded-xl border border-zinc-700 px-4 py-2 text-sm hover:bg-zinc-900"
+                >
+                  Clear filters
+                </button>
+              )}
             </div>
           </aside>
 
@@ -248,7 +379,7 @@ export default function MarketplacePage({
               </div>
 
               <select
-                className="rounded-xl bg-zinc-800 p-3 text-sm outline-none"
+                className="rounded-xl bg-zinc-800 p-3 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
                 value={sort}
                 onChange={(e) => setSort(e.target.value)}
               >
@@ -318,62 +449,111 @@ function ProductCard({
   onRequest,
 }: {
   product: Product;
-  category: "accounts" | "pins";
+  category: ProductCategory;
   onRequest: () => void;
 }) {
   return (
-    <div className="rounded-2xl border border-zinc-800 bg-zinc-900/90 p-5">
-      <div className="flex justify-between gap-4">
-        <div>
-          <h3 className="font-bold leading-6">{product.title}</h3>
+    <div className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900/90">
+      <div className="relative h-44 bg-zinc-950">
+        {product.video_url ? (
+          <video
+            src={product.video_url}
+            className="h-full w-full object-cover"
+            controls
+            muted
+          />
+        ) : product.image_url ? (
+          <img
+            src={product.image_url}
+            alt={product.title}
+            className="h-full w-full object-cover"
+          />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center text-5xl">
+            {categoryIcons[category]}
+          </div>
+        )}
 
-          <p className="mt-3 line-clamp-2 text-sm text-zinc-400">
-            {product.description || "No description provided."}
-          </p>
-        </div>
-
-        <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-zinc-800 text-3xl">
-          {category === "accounts" ? "🎮" : "📌"}
-        </div>
+        {product.rank_icon_url && (
+          <img
+            src={product.rank_icon_url}
+            alt="Rank icon"
+            className="absolute bottom-3 left-3 h-12 w-12 rounded-xl border border-zinc-700 bg-zinc-950 object-cover p-1"
+          />
+        )}
       </div>
 
-      <div className="mt-4 flex flex-wrap gap-2">
-        {(product.tags ?? []).slice(0, 4).map((tag) => (
-          <span
-            key={tag}
-            className="rounded-lg bg-zinc-800 px-2 py-1 text-xs text-zinc-300"
+      <div className="p-5">
+        <div className="flex justify-between gap-4">
+          <div>
+            <h3 className="font-bold leading-6">{product.title}</h3>
+
+            <p className="mt-3 line-clamp-2 text-sm text-zinc-400">
+              {product.description || "No description provided."}
+            </p>
+          </div>
+
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-zinc-800 text-2xl">
+            {categoryIcons[category]}
+          </div>
+        </div>
+
+        <div className="mt-4 flex flex-wrap gap-2">
+          {(product.tags ?? []).slice(0, 5).map((tag) => (
+            <span
+              key={tag}
+              className="rounded-lg bg-zinc-800 px-2 py-1 text-xs text-zinc-300"
+            >
+              {tag}
+            </span>
+          ))}
+        </div>
+
+        <div className="mt-6 flex items-end justify-between gap-4">
+          <div>
+            <p className="text-xs text-zinc-500">
+              {product.delivery_time || "Manual review"}
+            </p>
+            <p className="mt-1 text-2xl font-bold text-yellow-300">
+              SGD{Number(product.price ?? 0).toFixed(2)}
+            </p>
+          </div>
+
+          <button
+            onClick={onRequest}
+            className="rounded-xl bg-yellow-400 px-4 py-2 text-sm font-bold text-black hover:bg-yellow-300"
           >
-            {tag}
-          </span>
-        ))}
-      </div>
-
-      <div className="mt-6 flex items-end justify-between gap-4">
-        <div>
-          <p className="text-xs text-zinc-500">
-            {product.delivery_time || "Manual review"}
-          </p>
-          <p className="mt-1 text-2xl font-bold text-yellow-300">
-            SGD{Number(product.price ?? 0).toFixed(2)}
-          </p>
+            Request
+          </button>
         </div>
-
-        <button
-          onClick={onRequest}
-          className="rounded-xl bg-yellow-400 px-4 py-2 text-sm font-bold text-black hover:bg-yellow-300"
-        >
-          Request
-        </button>
       </div>
     </div>
   );
 }
 
-function FilterText({ text }: { text: string }) {
+function FilterButton({
+  text,
+  active,
+  onClick,
+}: {
+  text: string;
+  active: boolean;
+  onClick: () => void;
+}) {
   return (
-    <div className="flex items-center gap-3">
-      <span className="h-4 w-4 rounded-full border-2 border-white" />
-      <span>{text}</span>
-    </div>
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex items-center gap-3 text-left"
+    >
+      <span
+        className={`h-4 w-4 rounded-full border-2 ${
+          active ? "border-yellow-400 bg-yellow-400" : "border-white"
+        }`}
+      />
+      <span className={active ? "text-yellow-300" : "text-zinc-300"}>
+        {text}
+      </span>
+    </button>
   );
 }
