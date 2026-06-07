@@ -10,6 +10,7 @@ const serviceTabs = [
   "Trophy Boost",
   "Prestige Icon",
   "Brawlers Rank",
+  "Coaching",
   "Custom Request",
 ];
 
@@ -78,6 +79,7 @@ export default function ServicesPage() {
     setOrderMode("Boost");
     setExpress(false);
     setNotes("");
+    setTag("#");
 
     if (tab === "Rank Boost") {
       setCurrentRank("Bronze I");
@@ -103,6 +105,10 @@ export default function ServicesPage() {
       setBrawler("");
     }
 
+    if (tab === "Coaching") {
+      setBrawler("");
+    }
+
     if (tab === "Custom Request") {
       setNotes("");
     }
@@ -112,7 +118,9 @@ export default function ServicesPage() {
     if (serviceType === "Rank Boost") return currentRank;
     if (serviceType === "Trophy Boost") return currentTrophies || "N/A";
     if (serviceType === "Prestige Icon") return brawler || "N/A";
-    if (serviceType === "Brawlers Rank") return `${brawler || "Brawler"} - ${currentRank}`;
+    if (serviceType === "Brawlers Rank")
+      return `${brawler || "Brawler"} - ${currentRank}`;
+    if (serviceType === "Coaching") return brawler || "Gameplay Review";
     return "Custom";
   }
 
@@ -121,6 +129,7 @@ export default function ServicesPage() {
     if (serviceType === "Trophy Boost") return targetTrophies || "N/A";
     if (serviceType === "Prestige Icon") return prestigeTarget;
     if (serviceType === "Brawlers Rank") return targetRank;
+    if (serviceType === "Coaching") return "Admin Review";
     return "Admin Review";
   }
 
@@ -130,7 +139,7 @@ export default function ServicesPage() {
       "",
       "Order Details:",
       `Service: ${serviceType}`,
-      `Mode: ${orderMode}`,
+      `Type: ${orderMode}`,
       `Express: ${express ? "Yes" : "No"}`,
       `Tag: ${tag || "Not provided"}`,
     ];
@@ -157,6 +166,10 @@ export default function ServicesPage() {
       lines.push(`Brawler: ${brawler || "Not provided"}`);
       lines.push(`Current Rank: ${currentRank}`);
       lines.push(`Target Rank: ${targetRank}`);
+    }
+
+    if (serviceType === "Coaching") {
+      lines.push(`Brawler: ${brawler || "Not provided"}`);
     }
 
     return lines.join("\n");
@@ -207,6 +220,12 @@ export default function ServicesPage() {
             <Link href="/services" className="text-yellow-300">
               Services
             </Link>
+            <Link href="/accounts" className="hover:text-white">
+              Accounts
+            </Link>
+            <Link href="/pins" className="hover:text-white">
+              Pins
+            </Link>
             <Link href="/dashboard" className="hover:text-white">
               Dashboard
             </Link>
@@ -225,14 +244,46 @@ export default function ServicesPage() {
       </nav>
 
       <section className="border-b border-zinc-900 bg-[#181821]">
-        <div className="mx-auto flex max-w-7xl items-center gap-8 px-6 py-5 text-sm">
+        <div className="mx-auto flex max-w-7xl items-center gap-8 overflow-x-auto px-6 py-5 text-sm">
           <span className="rounded bg-yellow-400 px-2 py-1 font-bold text-black">
             BS
           </span>
-          <span className="border-b-2 border-yellow-400 pb-4">Boosting</span>
-          <span className="text-zinc-500">Coaching</span>
-          <span className="text-zinc-500">Custom Requests</span>
-          <span className="text-zinc-500">Order Tracking</span>
+
+          <Link
+            href="/services"
+            className="whitespace-nowrap border-b-2 border-yellow-400 pb-4 text-white"
+          >
+            Boosting
+          </Link>
+
+          <button
+            type="button"
+            onClick={() => resetFieldsForTab("Coaching")}
+            className="whitespace-nowrap pb-4 text-zinc-400 hover:text-white"
+          >
+            Coaching
+          </button>
+
+          <Link
+            href="/accounts"
+            className="whitespace-nowrap pb-4 text-zinc-400 hover:text-white"
+          >
+            Accounts
+          </Link>
+
+          <Link
+            href="/pins"
+            className="whitespace-nowrap pb-4 text-zinc-400 hover:text-white"
+          >
+            Exclusive Pins
+          </Link>
+
+          <Link
+            href="/dashboard"
+            className="whitespace-nowrap pb-4 text-zinc-400 hover:text-white"
+          >
+            Order Tracking
+          </Link>
         </div>
       </section>
 
@@ -269,6 +320,7 @@ export default function ServicesPage() {
             {serviceTabs.map((tab) => (
               <button
                 key={tab}
+                type="button"
                 onClick={() => resetFieldsForTab(tab)}
                 className={`rounded-full border px-5 py-2 text-sm font-semibold ${
                   serviceType === tab
@@ -428,6 +480,15 @@ export default function ServicesPage() {
                         options={targetRanks}
                       />
                     </>
+                  )}
+
+                  {serviceType === "Coaching" && (
+                    <TextField
+                      label="Brawler"
+                      value={brawler}
+                      onChange={setBrawler}
+                      placeholder="e.g. Piper"
+                    />
                   )}
 
                   <TextField
@@ -610,6 +671,24 @@ function ServiceForm(props: ServiceFormProps) {
             options={targetRanks}
           />
         </div>
+      </FormPanel>
+    );
+  }
+
+  if (props.serviceType === "Coaching") {
+    return (
+      <FormPanel title="Coaching">
+        <p className="mb-5 max-w-3xl text-zinc-300">
+          Request gameplay feedback, coaching advice, or strategy review. Add
+          your details in the notes section below.
+        </p>
+
+        <TextInput
+          label="Brawler"
+          value={props.brawler}
+          onChange={props.setBrawler}
+          placeholder="e.g. Piper, Edgar, Shelly"
+        />
       </FormPanel>
     );
   }
