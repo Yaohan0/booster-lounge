@@ -2,27 +2,27 @@ import Link from "next/link";
 
 const services = [
   {
-    title: "Coaching Session",
+    title: "Rank Boost Request",
     description:
-      "Get gameplay advice, strategy tips, and improvement guidance based on your current level.",
+      "Choose your current rank, desired rank, and options. Admin reviews your request before assigning an order.",
   },
   {
-    title: "Gameplay Review",
+    title: "Gameplay Coaching",
     description:
-      "Submit details about your playstyle and receive structured feedback from the admin.",
+      "Request coaching support, gameplay review, or strategy guidance based on your current level.",
   },
   {
-    title: "Rank Progress Tracking",
+    title: "Order Tracking Dashboard",
     description:
-      "Track assigned orders, order status, chat updates, and account credits from your dashboard.",
+      "Track assigned orders, request status, credits, admin updates, and chat messages from your dashboard.",
   },
 ];
 
 const steps = [
   "Create an account",
-  "Admin assigns your order",
-  "Track progress from your dashboard",
-  "Chat with admin for updates",
+  "Submit a service request",
+  "Admin reviews your request",
+  "Track progress from dashboard",
 ];
 
 export default function Home() {
@@ -34,6 +34,13 @@ export default function Home() {
         </Link>
 
         <div className="flex items-center gap-3">
+          <Link
+            href="/services"
+            className="hidden rounded-xl border border-zinc-700 px-4 py-2 text-sm font-semibold text-zinc-200 hover:bg-zinc-900 sm:inline-block"
+          >
+            Services
+          </Link>
+
           <Link
             href="/login"
             className="rounded-xl border border-zinc-700 px-4 py-2 text-sm font-semibold text-zinc-200 hover:bg-zinc-900"
@@ -53,32 +60,32 @@ export default function Home() {
       <section className="mx-auto grid min-h-[75vh] max-w-6xl items-center gap-10 px-6 py-16 lg:grid-cols-2">
         <div>
           <p className="inline-flex rounded-full border border-yellow-400/40 bg-yellow-400/10 px-4 py-2 text-sm font-semibold text-yellow-300">
-            Brawl Stars Coaching & Order Tracking
+            Brawl Stars Services & Order Tracking
           </p>
 
           <h1 className="mt-6 text-5xl font-bold tracking-tight md:text-7xl">
-            Track your boost orders like a real dashboard.
+            Submit requests and track orders like a real dashboard.
           </h1>
 
           <p className="mt-6 max-w-xl text-lg leading-8 text-zinc-300">
-            Booster Lounge lets users log in, view assigned orders, track
-            progress, manage credits, and chat with the admin in one clean
-            dashboard.
+            Booster Lounge lets users submit service requests, view assigned
+            orders, track progress, manage credits, and chat with the admin in
+            one clean dashboard.
           </p>
 
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">
             <Link
-              href="/register"
+              href="/services"
               className="rounded-xl bg-yellow-400 px-6 py-3 text-center font-bold text-black hover:bg-yellow-300"
             >
-              Create Account
+              View Services
             </Link>
 
             <Link
-              href="/login"
+              href="/dashboard"
               className="rounded-xl border border-zinc-700 px-6 py-3 text-center font-bold text-white hover:bg-zinc-900"
             >
-              Login
+              Dashboard
             </Link>
           </div>
 
@@ -103,12 +110,13 @@ export default function Home() {
 
             <div className="mt-6 grid gap-4">
               <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
-                <div className="flex items-center justify-between">
-                  <p className="font-semibold">Rank Improvement Guidance</p>
-                  <span className="rounded-full border border-blue-400/40 bg-blue-400/10 px-3 py-1 text-xs font-semibold text-blue-300">
-                    in progress
+                <div className="flex items-center justify-between gap-4">
+                  <p className="font-semibold">Rank Boost Request</p>
+                  <span className="rounded-full border border-green-400/40 bg-green-400/10 px-3 py-1 text-xs font-semibold text-green-300">
+                    accepted
                   </span>
                 </div>
+
                 <p className="mt-2 text-sm text-zinc-400">
                   Diamond → Masters
                 </p>
@@ -124,7 +132,8 @@ export default function Home() {
               <div className="rounded-xl border border-zinc-800 bg-zinc-950 p-4">
                 <p className="text-sm font-semibold">Admin Chat</p>
                 <p className="mt-2 rounded-lg bg-zinc-800 p-3 text-sm text-zinc-300">
-                  Your order has been accepted. Progress will be updated soon.
+                  Your request has been reviewed. Order progress will be updated
+                  here.
                 </p>
               </div>
             </div>
@@ -136,8 +145,8 @@ export default function Home() {
         <div className="max-w-2xl">
           <h2 className="text-3xl font-bold">Services</h2>
           <p className="mt-3 text-zinc-400">
-            Users do not create orders directly. Admins assign orders, while
-            users track progress from their dashboard.
+            Users can submit service requests. Admins review requests, assign
+            orders, and update progress from the admin panel.
           </p>
         </div>
 
@@ -154,6 +163,15 @@ export default function Home() {
             </div>
           ))}
         </div>
+
+        <div className="mt-8">
+          <Link
+            href="/services"
+            className="inline-flex rounded-xl bg-yellow-400 px-6 py-3 font-bold text-black hover:bg-yellow-300"
+          >
+            Browse Services
+          </Link>
+        </div>
       </section>
 
       <section className="mx-auto max-w-6xl px-6 py-16">
@@ -169,9 +187,36 @@ export default function Home() {
                 <div className="flex h-10 w-10 items-center justify-center rounded-full bg-yellow-400 font-bold text-black">
                   {index + 1}
                 </div>
+
                 <p className="mt-4 font-semibold">{step}</p>
               </div>
             ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="mx-auto max-w-6xl px-6 py-16">
+        <div className="rounded-3xl border border-yellow-400/30 bg-yellow-400/10 p-8">
+          <h2 className="text-3xl font-bold">Ready to submit a request?</h2>
+          <p className="mt-3 max-w-2xl text-zinc-300">
+            Pick your service type, choose your current and desired rank, add
+            notes, and submit it for admin review.
+          </p>
+
+          <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+            <Link
+              href="/services"
+              className="rounded-xl bg-yellow-400 px-6 py-3 text-center font-bold text-black hover:bg-yellow-300"
+            >
+              Start Request
+            </Link>
+
+            <Link
+              href="/register"
+              className="rounded-xl border border-zinc-700 px-6 py-3 text-center font-bold text-white hover:bg-zinc-900"
+            >
+              Create Account
+            </Link>
           </div>
         </div>
       </section>

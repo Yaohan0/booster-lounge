@@ -23,7 +23,22 @@ type Order = {
   status: string;
   created_at: string;
   updated_at: string | null;
+  completed_at: string | null;
   user_seen_update: boolean | null;
+  admin_archived: boolean | null;
+};
+
+type OrderRequest = {
+  id: string;
+  user_id: string;
+  service_type: string;
+  current_rank: string | null;
+  target_rank: string | null;
+  notes: string | null;
+  status: string;
+  admin_notes: string | null;
+  created_at: string;
+  updated_at: string | null;
 };
 
 type Message = {
@@ -40,6 +55,9 @@ export default function AdminPage() {
 
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
+  const [requests, setRequests] = useState<OrderRequest[]>([]);
+  const [messages, setMessages] = useState<Message[]>([]);
+
   const [allowed, setAllowed] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -49,13 +67,14 @@ export default function AdminPage() {
   const [targetRank, setTargetRank] = useState("");
   const [notes, setNotes] = useState("");
 
-  const [messages, setMessages] = useState<Message[]>([]);
   const [chatInputs, setChatInputs] = useState<Record<string, string>>({});
   const [currentUserId, setCurrentUserId] = useState("");
 
   const [userSearch, setUserSearch] = useState("");
+  const [requestSearch, setRequestSearch] = useState("");
   const [orderSearch, setOrderSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [selectedProfileId, setSelectedProfileId] = useState("");
 
   useEffect(() => {
     async function loadAdminData() {
@@ -121,6 +140,16 @@ export default function AdminPage() {
       return;
     }
 
+    const { data: requestData, error: requestError } = await supabase
+      .from("order_requests")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (requestError) {
+      alert(requestError.message);
+      return;
+    }
+
     const { data: messageData, error: messageError } = await supabase
       .from("messages")
       .select("*")
@@ -133,6 +162,7 @@ export default function AdminPage() {
 
     if (profileData) setProfiles(profileData);
     if (orderData) setOrders(orderData);
+    if (requestData) setRequests(requestData);
     if (messageData) setMessages(messageData);
   }
 
@@ -152,6 +182,7 @@ export default function AdminPage() {
       notes,
       status: "pending",
       user_seen_update: false,
+      admin_archived: false,
     });
 
     if (error) {
@@ -169,11 +200,50 @@ export default function AdminPage() {
   }
 
   async function updateStatus(orderId: string, status: string) {
+    const updateData: Partial<Order> = {
+      status,
+      updated_at: new Date().toISOString(),
+      user_seen_update: false,
+    };
+
+    if (status === "completed") {
+      updateData.completed_at = new Date().toISOString();
+    }
+
+    const { error } = await supabase
+      .from("orders")
+      .update(updateData)
+      .eq("id", orderId);
+
+    if (error) {
+      alert(error.message);
+      return;
+    }
+
+    setOrders((prev) =>
+      prev.map((order) =>
+        order.id === orderId
+          ? {
+              ...order,
+              ...updateData,
+            }
+          : order
+      )
+    );
+  }
+
+  async function archiveCompletedOrder(orderId: string) {
+    const confirmed = confirm(
+      "Remove this completed order from the active admin list? The user will still see it in their completed history."
+    );
+
+    if (!confirmed) return;
+
     const { error } = await supabase
       .from("orders")
       .update({
-        status,
-        user_seen_update: false,
+        admin_archived: true,
+        updated_at: new Date().toISOString(),
       })
       .eq("id", orderId);
 
@@ -187,9 +257,35 @@ export default function AdminPage() {
         order.id === orderId
           ? {
               ...order,
-              status,
+              admin_archived: true,
               updated_at: new Date().toISOString(),
-              user_seen_update: false,
+            }
+          : order
+      )
+    );
+  }
+
+  async function restoreArchivedOrder(orderId: string) {
+    const { error } = await supabase
+      .from("orders")
+      .update({
+        admin_archived: false,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", orderId);
+
+    if (error) {
+      alert(error.message);
+      return;
+    }
+
+    setOrders((prev) =>
+      prev.map((order) =>
+        order.id === orderId
+          ? {
+              ...order,
+              admin_archived: false,
+              updated_at: new Date().toISOString(),
             }
           : order
       )
@@ -212,6 +308,60 @@ export default function AdminPage() {
         profile.id === userId ? { ...profile, credits } : profile
       )
     );
+  }
+
+  async function updateRequestStatus(requestId: string, status: string) {
+    const { error } = await supabase
+      .from("order_requests")
+      .update({ status })
+      .eq("id", requestId);
+
+    if (error) {
+      alert(error.message);
+      return;
+    }
+
+    setRequests((prev) =>
+      prev.map((request) =>
+        request.id === requestId
+          ? {
+              ...request,
+              status,
+              updated_at: new Date().toISOString(),
+            }
+          : request
+      )
+    );
+  }
+
+  async function convertRequestToOrder(request: OrderRequest) {
+    const { error: orderError } = await supabase.from("orders").insert({
+      user_id: request.user_id,
+      service_type: request.service_type,
+      current_rank: request.current_rank,
+      target_rank: request.target_rank,
+      notes: request.notes,
+      status: "pending",
+      user_seen_update: false,
+      admin_archived: false,
+    });
+
+    if (orderError) {
+      alert(orderError.message);
+      return;
+    }
+
+    const { error: requestError } = await supabase
+      .from("order_requests")
+      .update({ status: "converted_to_order" })
+      .eq("id", request.id);
+
+    if (requestError) {
+      alert(requestError.message);
+      return;
+    }
+
+    await refreshAdminData();
   }
 
   async function sendAdminMessage(orderId: string) {
@@ -259,7 +409,23 @@ export default function AdminPage() {
     profile.email?.toLowerCase().includes(userSearch.toLowerCase())
   );
 
-  const filteredOrders = orders.filter((order) => {
+  const filteredRequests = requests.filter((request) => {
+    const user = profiles.find((profile) => profile.id === request.user_id);
+    const search = requestSearch.toLowerCase();
+
+    return (
+      user?.email?.toLowerCase().includes(search) ||
+      request.service_type.toLowerCase().includes(search) ||
+      request.current_rank?.toLowerCase().includes(search) ||
+      request.target_rank?.toLowerCase().includes(search) ||
+      request.notes?.toLowerCase().includes(search) ||
+      request.status.toLowerCase().includes(search)
+    );
+  });
+
+  const activeOrders = orders.filter((order) => order.admin_archived !== true);
+
+  const filteredOrders = activeOrders.filter((order) => {
     const user = profiles.find((profile) => profile.id === order.user_id);
     const search = orderSearch.toLowerCase();
 
@@ -276,6 +442,17 @@ export default function AdminPage() {
     return matchesSearch && matchesStatus;
   });
 
+  const completedOrders = orders.filter((order) => order.status === "completed");
+  const archivedOrders = orders.filter((order) => order.admin_archived === true);
+
+  const selectedProfile = profiles.find(
+    (profile) => profile.id === selectedProfileId
+  );
+
+  const selectedProfileOrders = selectedProfileId
+    ? orders.filter((order) => order.user_id === selectedProfileId)
+    : [];
+
   if (loading || !allowed) {
     return (
       <PageShell title="Admin Panel" subtitle="Checking admin access.">
@@ -289,7 +466,7 @@ export default function AdminPage() {
   return (
     <PageShell
       title="Admin Panel"
-      subtitle="Assign orders, update progress, manage credits, and reply to chats."
+      subtitle="Assign orders, review requests, manage credits, and view completed boost history."
       rightAction={
         <button
           onClick={logout}
@@ -299,41 +476,15 @@ export default function AdminPage() {
         </button>
       }
     >
-      <div className="grid gap-4 md:grid-cols-4">
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-6">
-          <p className="text-sm text-zinc-400">Total Users</p>
-          <h2 className="mt-2 text-4xl font-bold">{profiles.length}</h2>
-        </div>
-
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-6">
-          <p className="text-sm text-zinc-400">Total Orders</p>
-          <h2 className="mt-2 text-4xl font-bold">{orders.length}</h2>
-        </div>
-
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-6">
-          <p className="text-sm text-zinc-400">Filtered Orders</p>
-          <h2 className="mt-2 text-4xl font-bold">{filteredOrders.length}</h2>
-        </div>
-
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-6">
-          <p className="text-sm text-zinc-400">Open Orders</p>
-          <h2 className="mt-2 text-4xl font-bold text-yellow-400">
-            {
-              orders.filter(
-                (order) =>
-                  order.status !== "completed" && order.status !== "cancelled"
-              ).length
-            }
-          </h2>
-        </div>
+      <div className="grid gap-4 md:grid-cols-5">
+        <StatCard label="Users" value={profiles.length} />
+        <StatCard label="Active Orders" value={activeOrders.length} />
+        <StatCard label="Requests" value={requests.length} />
+        <StatCard label="Completed" value={completedOrders.length} />
+        <StatCard label="Archived" value={archivedOrders.length} highlight />
       </div>
 
-      <div className="mt-8 rounded-2xl border border-zinc-800 bg-zinc-900/80 p-6">
-        <h2 className="text-xl font-bold">Assign New Order</h2>
-        <p className="mt-1 text-sm text-zinc-400">
-          Create a new order and assign it to a normal user.
-        </p>
-
+      <Panel title="Assign New Order" subtitle="Create a new active order and assign it to a normal user.">
         <form onSubmit={assignOrder} className="mt-5 grid gap-4">
           <div className="grid gap-4 md:grid-cols-2">
             <select
@@ -360,6 +511,9 @@ export default function AdminPage() {
               <option>Rank Improvement Guidance</option>
               <option>Gameplay Review</option>
               <option>Team Strategy Help</option>
+              <option>Rank Boost</option>
+              <option>Trophy Boost</option>
+              <option>Custom Request</option>
             </select>
           </div>
 
@@ -390,14 +544,99 @@ export default function AdminPage() {
             Assign Order
           </button>
         </form>
-      </div>
+      </Panel>
 
-      <div className="mt-8 rounded-2xl border border-zinc-800 bg-zinc-900/80 p-6">
-        <h2 className="text-xl font-bold">Users & Credits</h2>
-        <p className="mt-1 text-sm text-zinc-400">
-          Search users and update credit balances.
-        </p>
+      <Panel
+        title="Incoming Requests"
+        subtitle="Review service requests submitted from the services page."
+      >
+        <input
+          className="mt-5 w-full rounded-xl bg-zinc-800 p-3 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
+          placeholder="Search requests by user, service, rank, notes, or status..."
+          value={requestSearch}
+          onChange={(e) => setRequestSearch(e.target.value)}
+        />
 
+        <div className="mt-5 grid gap-5">
+          {filteredRequests.length === 0 && (
+            <EmptyState text="No incoming requests found." />
+          )}
+
+          {filteredRequests.map((request) => {
+            const user = profiles.find(
+              (profile) => profile.id === request.user_id
+            );
+
+            return (
+              <div
+                key={request.id}
+                className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-5"
+              >
+                <div className="flex flex-col justify-between gap-5 md:flex-row">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-3">
+                      <p className="text-lg font-bold">{request.service_type}</p>
+                      <StatusBadge status={request.status} />
+                    </div>
+
+                    <p className="mt-2 text-sm text-zinc-400">
+                      User: {user?.email || request.user_id}
+                    </p>
+
+                    <p className="text-sm text-zinc-400">
+                      {request.current_rank || "N/A"} →{" "}
+                      {request.target_rank || "N/A"}
+                    </p>
+
+                    <p className="mt-3 whitespace-pre-wrap text-sm text-zinc-300">
+                      Notes: {request.notes || "None"}
+                    </p>
+
+                    <DateGrid
+                      createdAt={request.created_at}
+                      updatedAt={request.updated_at}
+                      completedAt={null}
+                      formatDate={formatDate}
+                    />
+                  </div>
+
+                  <StatusCard label="Request Status" status={request.status} />
+                </div>
+
+                <div className="mt-5 flex flex-wrap gap-2">
+                  <RequestButton
+                    label="pending"
+                    active={request.status === "pending"}
+                    onClick={() => updateRequestStatus(request.id, "pending")}
+                  />
+                  <RequestButton
+                    label="accept"
+                    active={request.status === "accepted"}
+                    onClick={() => updateRequestStatus(request.id, "accepted")}
+                    variant="green"
+                  />
+                  <RequestButton
+                    label="reject"
+                    active={request.status === "rejected"}
+                    onClick={() => updateRequestStatus(request.id, "rejected")}
+                    variant="red"
+                  />
+
+                  <button
+                    onClick={() => convertRequestToOrder(request)}
+                    disabled={request.status === "converted_to_order"}
+                    className="rounded-xl bg-yellow-400 px-3 py-2 text-sm font-bold text-black hover:bg-yellow-300 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Convert to Order
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </Panel>
+
+      <Panel title="Users & Credits" subtitle="Search users, update credits, and view each user's boost history.">
         <input
           className="mt-5 w-full rounded-xl bg-zinc-800 p-3 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
           placeholder="Search user by email..."
@@ -406,11 +645,7 @@ export default function AdminPage() {
         />
 
         <div className="mt-5 grid gap-4">
-          {filteredProfiles.length === 0 && (
-            <div className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-5 text-sm text-zinc-400">
-              No users found.
-            </div>
-          )}
+          {filteredProfiles.length === 0 && <EmptyState text="No users found." />}
 
           {filteredProfiles.map((profile) => (
             <div
@@ -425,7 +660,7 @@ export default function AdminPage() {
                   </p>
                 </div>
 
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-3">
                   <input
                     className="w-36 rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
                     type="number"
@@ -438,19 +673,62 @@ export default function AdminPage() {
                   />
 
                   <span className="text-sm text-zinc-400">credits</span>
+
+                  <button
+                    onClick={() => setSelectedProfileId(profile.id)}
+                    className="rounded-xl bg-zinc-800 px-4 py-3 text-sm font-semibold hover:bg-zinc-700"
+                  >
+                    View Profile
+                  </button>
                 </div>
               </div>
             </div>
           ))}
         </div>
-      </div>
+      </Panel>
 
-      <div className="mt-8 rounded-2xl border border-zinc-800 bg-zinc-900/80 p-6">
-        <h2 className="text-xl font-bold">All Orders</h2>
-        <p className="mt-1 text-sm text-zinc-400">
-          Search, filter, update order status, and reply to users.
-        </p>
+      {selectedProfile && (
+        <Panel
+          title={`Profile History: ${selectedProfile.email}`}
+          subtitle="Admin view of this user's active, completed, and archived orders."
+        >
+          <button
+            onClick={() => setSelectedProfileId("")}
+            className="mt-4 rounded-xl bg-zinc-800 px-4 py-2 text-sm hover:bg-zinc-700"
+          >
+            Close Profile History
+          </button>
 
+          <div className="mt-5 grid gap-5">
+            {selectedProfileOrders.length === 0 && (
+              <EmptyState text="This user has no orders yet." />
+            )}
+
+            {selectedProfileOrders.map((order) => (
+              <OrderCard
+                key={order.id}
+                order={order}
+                userEmail={selectedProfile.email || order.user_id}
+                messages={messages}
+                currentUserId={currentUserId}
+                chatInputs={chatInputs}
+                setChatInputs={setChatInputs}
+                sendAdminMessage={sendAdminMessage}
+                updateStatus={updateStatus}
+                archiveCompletedOrder={archiveCompletedOrder}
+                restoreArchivedOrder={restoreArchivedOrder}
+                formatDate={formatDate}
+                showArchiveControls
+              />
+            ))}
+          </div>
+        </Panel>
+      )}
+
+      <Panel
+        title="Active Orders"
+        subtitle="Search, filter, update status, chat, and remove completed orders from the active admin list."
+      >
         <div className="mt-5 grid gap-4 md:grid-cols-2">
           <input
             className="rounded-xl bg-zinc-800 p-3 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
@@ -476,140 +754,315 @@ export default function AdminPage() {
 
         <div className="mt-5 grid gap-5">
           {filteredOrders.length === 0 && (
-            <div className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-6 text-zinc-400">
-              No matching orders found.
-            </div>
+            <EmptyState text="No matching active orders found." />
           )}
 
           {filteredOrders.map((order) => {
             const user = profiles.find((p) => p.id === order.user_id);
-            const orderMessages = messages.filter(
-              (message) => message.order_id === order.id
-            );
 
             return (
-              <div
+              <OrderCard
                 key={order.id}
-                className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-5"
-              >
-                <div className="flex flex-col justify-between gap-5 md:flex-row md:items-start">
-                  <div>
-                    <div className="flex flex-wrap items-center gap-3">
-                      <p className="text-lg font-bold">{order.service_type}</p>
-                      <StatusBadge status={order.status} />
-                    </div>
-
-                    <p className="mt-2 text-sm text-zinc-400">
-                      User: {user?.email || order.user_id}
-                    </p>
-
-                    <p className="text-sm text-zinc-400">
-                      {order.current_rank || "N/A"} →{" "}
-                      {order.target_rank || "N/A"}
-                    </p>
-
-                    <p className="mt-3 text-sm text-zinc-300">
-                      Notes: {order.notes || "None"}
-                    </p>
-
-                    <div className="mt-4 grid gap-3 text-sm text-zinc-400 md:grid-cols-2">
-                      <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-3">
-                        <p className="text-xs text-zinc-500">Created</p>
-                        <p className="mt-1">{formatDate(order.created_at)}</p>
-                      </div>
-
-                      <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-3">
-                        <p className="text-xs text-zinc-500">Last Updated</p>
-                        <p className="mt-1">{formatDate(order.updated_at)}</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">
-                    <p className="text-xs text-zinc-500">Current Status</p>
-                    <div className="mt-2">
-                      <StatusBadge status={order.status} />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="mt-5 flex flex-wrap gap-2">
-                  {[
-                    "pending",
-                    "accepted",
-                    "rejected",
-                    "in_progress",
-                    "completed",
-                    "cancelled",
-                  ].map((status) => (
-                    <button
-                      key={status}
-                      onClick={() => updateStatus(order.id, status)}
-                      className={`rounded-xl px-3 py-2 text-sm ${
-                        order.status === status
-                          ? "bg-yellow-400 font-bold text-black"
-                          : "bg-zinc-800 text-white hover:bg-zinc-700"
-                      }`}
-                    >
-                      {status.replace("_", " ")}
-                    </button>
-                  ))}
-                </div>
-
-                <div className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900/80 p-5">
-                  <div className="flex items-center justify-between">
-                    <h4 className="font-semibold">Order Chat</h4>
-                    <p className="text-xs text-zinc-500">
-                      {orderMessages.length} message
-                      {orderMessages.length === 1 ? "" : "s"}
-                    </p>
-                  </div>
-
-                  <div className="mt-4 max-h-64 space-y-3 overflow-y-auto rounded-xl bg-zinc-950 p-3">
-                    {orderMessages.length === 0 && (
-                      <p className="text-sm text-zinc-500">No messages yet.</p>
-                    )}
-
-                    {orderMessages.map((message) => (
-                      <div
-                        key={message.id}
-                        className={`max-w-[85%] rounded-xl p-3 text-sm ${
-                          message.sender_id === currentUserId
-                            ? "ml-auto bg-yellow-400 text-black"
-                            : "mr-auto bg-zinc-800 text-white"
-                        }`}
-                      >
-                        {message.message}
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="mt-4 flex gap-2">
-                    <input
-                      className="flex-1 rounded-xl bg-zinc-800 p-3 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
-                      placeholder="Reply to user..."
-                      value={chatInputs[order.id] ?? ""}
-                      onChange={(e) =>
-                        setChatInputs((prev) => ({
-                          ...prev,
-                          [order.id]: e.target.value,
-                        }))
-                      }
-                    />
-
-                    <button
-                      onClick={() => sendAdminMessage(order.id)}
-                      className="rounded-xl bg-yellow-400 px-5 py-2 text-sm font-bold text-black hover:bg-yellow-300"
-                    >
-                      Send
-                    </button>
-                  </div>
-                </div>
-              </div>
+                order={order}
+                userEmail={user?.email || order.user_id}
+                messages={messages}
+                currentUserId={currentUserId}
+                chatInputs={chatInputs}
+                setChatInputs={setChatInputs}
+                sendAdminMessage={sendAdminMessage}
+                updateStatus={updateStatus}
+                archiveCompletedOrder={archiveCompletedOrder}
+                restoreArchivedOrder={restoreArchivedOrder}
+                formatDate={formatDate}
+                showArchiveControls
+              />
             );
           })}
         </div>
-      </div>
+      </Panel>
     </PageShell>
+  );
+}
+
+function StatCard({
+  label,
+  value,
+  highlight = false,
+}: {
+  label: string;
+  value: number;
+  highlight?: boolean;
+}) {
+  return (
+    <div className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-6">
+      <p className="text-sm text-zinc-400">{label}</p>
+      <h2
+        className={`mt-2 text-4xl font-bold ${
+          highlight ? "text-yellow-400" : "text-white"
+        }`}
+      >
+        {value}
+      </h2>
+    </div>
+  );
+}
+
+function Panel({
+  title,
+  subtitle,
+  children,
+}: {
+  title: string;
+  subtitle: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="mt-8 rounded-2xl border border-zinc-800 bg-zinc-900/80 p-6">
+      <h2 className="text-xl font-bold">{title}</h2>
+      <p className="mt-1 text-sm text-zinc-400">{subtitle}</p>
+      {children}
+    </div>
+  );
+}
+
+function EmptyState({ text }: { text: string }) {
+  return (
+    <div className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-6 text-zinc-400">
+      {text}
+    </div>
+  );
+}
+
+function StatusCard({ label, status }: { label: string; status: string }) {
+  return (
+    <div className="h-fit rounded-xl border border-zinc-800 bg-zinc-900 p-4">
+      <p className="text-xs text-zinc-500">{label}</p>
+      <div className="mt-2">
+        <StatusBadge status={status} />
+      </div>
+    </div>
+  );
+}
+
+function RequestButton({
+  label,
+  active,
+  onClick,
+  variant = "yellow",
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+  variant?: "yellow" | "green" | "red";
+}) {
+  const activeClasses = {
+    yellow: "bg-yellow-400 text-black",
+    green: "bg-green-400 text-black",
+    red: "bg-red-400 text-black",
+  };
+
+  return (
+    <button
+      onClick={onClick}
+      className={`rounded-xl px-3 py-2 text-sm ${
+        active
+          ? `${activeClasses[variant]} font-bold`
+          : "bg-zinc-800 text-white hover:bg-zinc-700"
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
+
+function DateGrid({
+  createdAt,
+  updatedAt,
+  completedAt,
+  formatDate,
+}: {
+  createdAt: string;
+  updatedAt: string | null;
+  completedAt: string | null;
+  formatDate: (date: string | null) => string;
+}) {
+  return (
+    <div className="mt-4 grid gap-3 text-sm text-zinc-400 md:grid-cols-3">
+      <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-3">
+        <p className="text-xs text-zinc-500">Created</p>
+        <p className="mt-1">{formatDate(createdAt)}</p>
+      </div>
+
+      <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-3">
+        <p className="text-xs text-zinc-500">Last Updated</p>
+        <p className="mt-1">{formatDate(updatedAt)}</p>
+      </div>
+
+      <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-3">
+        <p className="text-xs text-zinc-500">Completed</p>
+        <p className="mt-1">{formatDate(completedAt)}</p>
+      </div>
+    </div>
+  );
+}
+
+function OrderCard({
+  order,
+  userEmail,
+  messages,
+  currentUserId,
+  chatInputs,
+  setChatInputs,
+  sendAdminMessage,
+  updateStatus,
+  archiveCompletedOrder,
+  restoreArchivedOrder,
+  formatDate,
+  showArchiveControls,
+}: {
+  order: Order;
+  userEmail: string;
+  messages: Message[];
+  currentUserId: string;
+  chatInputs: Record<string, string>;
+  setChatInputs: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  sendAdminMessage: (orderId: string) => Promise<void>;
+  updateStatus: (orderId: string, status: string) => Promise<void>;
+  archiveCompletedOrder: (orderId: string) => Promise<void>;
+  restoreArchivedOrder: (orderId: string) => Promise<void>;
+  formatDate: (date: string | null) => string;
+  showArchiveControls?: boolean;
+}) {
+  const orderMessages = messages.filter(
+    (message) => message.order_id === order.id
+  );
+
+  return (
+    <div className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-5">
+      <div className="flex flex-col justify-between gap-5 md:flex-row md:items-start">
+        <div>
+          <div className="flex flex-wrap items-center gap-3">
+            <p className="text-lg font-bold">{order.service_type}</p>
+            <StatusBadge status={order.status} />
+
+            {order.admin_archived && (
+              <span className="rounded-full border border-zinc-600 bg-zinc-800 px-3 py-1 text-xs text-zinc-300">
+                archived
+              </span>
+            )}
+          </div>
+
+          <p className="mt-2 text-sm text-zinc-400">User: {userEmail}</p>
+
+          <p className="text-sm text-zinc-400">
+            {order.current_rank || "N/A"} → {order.target_rank || "N/A"}
+          </p>
+
+          <p className="mt-3 whitespace-pre-wrap text-sm text-zinc-300">
+            Notes: {order.notes || "None"}
+          </p>
+
+          <DateGrid
+            createdAt={order.created_at}
+            updatedAt={order.updated_at}
+            completedAt={order.completed_at}
+            formatDate={formatDate}
+          />
+        </div>
+
+        <StatusCard label="Current Status" status={order.status} />
+      </div>
+
+      <div className="mt-5 flex flex-wrap gap-2">
+        {[
+          "pending",
+          "accepted",
+          "rejected",
+          "in_progress",
+          "completed",
+          "cancelled",
+        ].map((status) => (
+          <button
+            key={status}
+            onClick={() => updateStatus(order.id, status)}
+            className={`rounded-xl px-3 py-2 text-sm ${
+              order.status === status
+                ? "bg-yellow-400 font-bold text-black"
+                : "bg-zinc-800 text-white hover:bg-zinc-700"
+            }`}
+          >
+            {status.replace("_", " ")}
+          </button>
+        ))}
+
+        {showArchiveControls && order.status === "completed" && !order.admin_archived && (
+          <button
+            onClick={() => archiveCompletedOrder(order.id)}
+            className="rounded-xl bg-red-500 px-3 py-2 text-sm font-bold text-white hover:bg-red-400"
+          >
+            Remove from Active
+          </button>
+        )}
+
+        {showArchiveControls && order.admin_archived && (
+          <button
+            onClick={() => restoreArchivedOrder(order.id)}
+            className="rounded-xl bg-blue-500 px-3 py-2 text-sm font-bold text-white hover:bg-blue-400"
+          >
+            Restore to Active
+          </button>
+        )}
+      </div>
+
+      <div className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900/80 p-5">
+        <div className="flex items-center justify-between">
+          <h4 className="font-semibold">Order Chat</h4>
+          <p className="text-xs text-zinc-500">
+            {orderMessages.length} message
+            {orderMessages.length === 1 ? "" : "s"}
+          </p>
+        </div>
+
+        <div className="mt-4 max-h-64 space-y-3 overflow-y-auto rounded-xl bg-zinc-950 p-3">
+          {orderMessages.length === 0 && (
+            <p className="text-sm text-zinc-500">No messages yet.</p>
+          )}
+
+          {orderMessages.map((message) => (
+            <div
+              key={message.id}
+              className={`max-w-[85%] rounded-xl p-3 text-sm ${
+                message.sender_id === currentUserId
+                  ? "ml-auto bg-yellow-400 text-black"
+                  : "mr-auto bg-zinc-800 text-white"
+              }`}
+            >
+              {message.message}
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-4 flex gap-2">
+          <input
+            className="flex-1 rounded-xl bg-zinc-800 p-3 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
+            placeholder="Reply to user..."
+            value={chatInputs[order.id] ?? ""}
+            onChange={(e) =>
+              setChatInputs((prev) => ({
+                ...prev,
+                [order.id]: e.target.value,
+              }))
+            }
+          />
+
+          <button
+            onClick={() => sendAdminMessage(order.id)}
+            className="rounded-xl bg-yellow-400 px-5 py-2 text-sm font-bold text-black hover:bg-yellow-300"
+          >
+            Send
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
