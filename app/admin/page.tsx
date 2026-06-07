@@ -22,6 +22,7 @@ type Order = {
   notes: string | null;
   status: string;
   created_at: string;
+  updated_at: string | null;
   user_seen_update: boolean | null;
 };
 
@@ -85,6 +86,15 @@ export default function AdminPage() {
 
     loadAdminData();
   }, [router, supabase]);
+
+  function formatDate(date: string | null) {
+    if (!date) return "N/A";
+
+    return new Intl.DateTimeFormat("en-SG", {
+      dateStyle: "medium",
+      timeStyle: "short",
+    }).format(new Date(date));
+  }
 
   async function refreshAdminData() {
     const { data: profileData, error: profileError } = await supabase
@@ -171,7 +181,12 @@ export default function AdminPage() {
     setOrders((prev) =>
       prev.map((order) =>
         order.id === orderId
-          ? { ...order, status, user_seen_update: false }
+          ? {
+              ...order,
+              status,
+              updated_at: new Date().toISOString(),
+              user_seen_update: false,
+            }
           : order
       )
     );
@@ -430,6 +445,18 @@ export default function AdminPage() {
                     <p className="mt-3 text-sm text-zinc-300">
                       Notes: {order.notes || "None"}
                     </p>
+
+                    <div className="mt-4 grid gap-3 text-sm text-zinc-400 md:grid-cols-2">
+                      <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-3">
+                        <p className="text-xs text-zinc-500">Created</p>
+                        <p className="mt-1">{formatDate(order.created_at)}</p>
+                      </div>
+
+                      <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-3">
+                        <p className="text-xs text-zinc-500">Last Updated</p>
+                        <p className="mt-1">{formatDate(order.updated_at)}</p>
+                      </div>
+                    </div>
                   </div>
 
                   <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-4">

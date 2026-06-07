@@ -13,6 +13,7 @@ type Order = {
   target_rank: string | null;
   status: string;
   created_at: string;
+  updated_at: string | null;
   user_seen_update: boolean | null;
 };
 
@@ -105,6 +106,15 @@ export default function DashboardPage() {
 
     loadData();
   }, [router, supabase]);
+
+  function formatDate(date: string | null) {
+    if (!date) return "N/A";
+
+    return new Intl.DateTimeFormat("en-SG", {
+      dateStyle: "medium",
+      timeStyle: "short",
+    }).format(new Date(date));
+  }
 
   async function logout() {
     await supabase.auth.signOut();
@@ -290,6 +300,18 @@ export default function DashboardPage() {
                     Mark as read
                   </button>
                 )}
+              </div>
+
+              <div className="mt-5 grid gap-3 text-sm text-zinc-400 md:grid-cols-2">
+                <div className="rounded-xl border border-zinc-800 bg-zinc-950/80 p-3">
+                  <p className="text-xs text-zinc-500">Created</p>
+                  <p className="mt-1">{formatDate(order.created_at)}</p>
+                </div>
+
+                <div className="rounded-xl border border-zinc-800 bg-zinc-950/80 p-3">
+                  <p className="text-xs text-zinc-500">Last Updated</p>
+                  <p className="mt-1">{formatDate(order.updated_at)}</p>
+                </div>
               </div>
 
               {order.status === "accepted" && (
