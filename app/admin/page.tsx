@@ -53,6 +53,10 @@ export default function AdminPage() {
   const [chatInputs, setChatInputs] = useState<Record<string, string>>({});
   const [currentUserId, setCurrentUserId] = useState("");
 
+  const [userSearch, setUserSearch] = useState("");
+  const [orderSearch, setOrderSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+
   useEffect(() => {
     async function loadAdminData() {
       setLoading(true);
@@ -251,6 +255,27 @@ export default function AdminPage() {
     router.push("/");
   }
 
+  const filteredProfiles = profiles.filter((profile) =>
+    profile.email?.toLowerCase().includes(userSearch.toLowerCase())
+  );
+
+  const filteredOrders = orders.filter((order) => {
+    const user = profiles.find((profile) => profile.id === order.user_id);
+    const search = orderSearch.toLowerCase();
+
+    const matchesSearch =
+      user?.email?.toLowerCase().includes(search) ||
+      order.service_type.toLowerCase().includes(search) ||
+      order.current_rank?.toLowerCase().includes(search) ||
+      order.target_rank?.toLowerCase().includes(search) ||
+      order.notes?.toLowerCase().includes(search);
+
+    const matchesStatus =
+      statusFilter === "all" || order.status === statusFilter;
+
+    return matchesSearch && matchesStatus;
+  });
+
   if (loading || !allowed) {
     return (
       <PageShell title="Admin Panel" subtitle="Checking admin access.">
@@ -274,7 +299,7 @@ export default function AdminPage() {
         </button>
       }
     >
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-4">
         <div className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-6">
           <p className="text-sm text-zinc-400">Total Users</p>
           <h2 className="mt-2 text-4xl font-bold">{profiles.length}</h2>
@@ -283,6 +308,11 @@ export default function AdminPage() {
         <div className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-6">
           <p className="text-sm text-zinc-400">Total Orders</p>
           <h2 className="mt-2 text-4xl font-bold">{orders.length}</h2>
+        </div>
+
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-6">
+          <p className="text-sm text-zinc-400">Filtered Orders</p>
+          <h2 className="mt-2 text-4xl font-bold">{filteredOrders.length}</h2>
         </div>
 
         <div className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-6">
@@ -365,11 +395,24 @@ export default function AdminPage() {
       <div className="mt-8 rounded-2xl border border-zinc-800 bg-zinc-900/80 p-6">
         <h2 className="text-xl font-bold">Users & Credits</h2>
         <p className="mt-1 text-sm text-zinc-400">
-          Update user credit balances.
+          Search users and update credit balances.
         </p>
 
+        <input
+          className="mt-5 w-full rounded-xl bg-zinc-800 p-3 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
+          placeholder="Search user by email..."
+          value={userSearch}
+          onChange={(e) => setUserSearch(e.target.value)}
+        />
+
         <div className="mt-5 grid gap-4">
-          {profiles.map((profile) => (
+          {filteredProfiles.length === 0 && (
+            <div className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-5 text-sm text-zinc-400">
+              No users found.
+            </div>
+          )}
+
+          {filteredProfiles.map((profile) => (
             <div
               key={profile.id}
               className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-5"
@@ -405,17 +448,40 @@ export default function AdminPage() {
       <div className="mt-8 rounded-2xl border border-zinc-800 bg-zinc-900/80 p-6">
         <h2 className="text-xl font-bold">All Orders</h2>
         <p className="mt-1 text-sm text-zinc-400">
-          Update order status and reply to users.
+          Search, filter, update order status, and reply to users.
         </p>
 
+        <div className="mt-5 grid gap-4 md:grid-cols-2">
+          <input
+            className="rounded-xl bg-zinc-800 p-3 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
+            placeholder="Search orders by user, service, rank, or notes..."
+            value={orderSearch}
+            onChange={(e) => setOrderSearch(e.target.value)}
+          />
+
+          <select
+            className="rounded-xl bg-zinc-800 p-3 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+          >
+            <option value="all">All statuses</option>
+            <option value="pending">Pending</option>
+            <option value="accepted">Accepted</option>
+            <option value="rejected">Rejected</option>
+            <option value="in_progress">In Progress</option>
+            <option value="completed">Completed</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+        </div>
+
         <div className="mt-5 grid gap-5">
-          {orders.length === 0 && (
+          {filteredOrders.length === 0 && (
             <div className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-6 text-zinc-400">
-              No orders yet.
+              No matching orders found.
             </div>
           )}
 
-          {orders.map((order) => {
+          {filteredOrders.map((order) => {
             const user = profiles.find((p) => p.id === order.user_id);
             const orderMessages = messages.filter(
               (message) => message.order_id === order.id
