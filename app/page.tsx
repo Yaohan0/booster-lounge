@@ -75,6 +75,19 @@ export default function Home() {
 
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">
             <Link
+              href="/accounts"
+              className="hidden rounded-xl border border-zinc-700 px-4 py-2 text-sm font-semibold text-zinc-200 hover:bg-zinc-900 sm:inline-block"
+            >
+              Accounts
+            </Link>
+
+            <Link
+              href="/pins"
+              className="hidden rounded-xl border border-zinc-700 px-4 py-2 text-sm font-semibold text-zinc-200 hover:bg-zinc-900 sm:inline-block"
+            >
+              Pins
+            </Link>
+            <Link
               href="/services"
               className="rounded-xl bg-yellow-400 px-6 py-3 text-center font-bold text-black hover:bg-yellow-300"
             >
