@@ -79,7 +79,7 @@ export default function ServicesPage() {
     setOrderMode("Boost");
     setExpress(false);
     setNotes("");
-    setTag("#");
+    setTag("");
 
     if (tab === "Rank Boost") {
       setCurrentRank("Bronze I");
@@ -118,8 +118,9 @@ export default function ServicesPage() {
     if (serviceType === "Rank Boost") return currentRank;
     if (serviceType === "Trophy Boost") return currentTrophies || "N/A";
     if (serviceType === "Prestige Icon") return brawler || "N/A";
-    if (serviceType === "Brawlers Rank")
+    if (serviceType === "Brawlers Rank") {
       return `${brawler || "Brawler"} - ${currentRank}`;
+    }
     if (serviceType === "Coaching") return brawler || "Gameplay Review";
     return "Custom";
   }
@@ -129,7 +130,6 @@ export default function ServicesPage() {
     if (serviceType === "Trophy Boost") return targetTrophies || "N/A";
     if (serviceType === "Prestige Icon") return prestigeTarget;
     if (serviceType === "Brawlers Rank") return targetRank;
-    if (serviceType === "Coaching") return "Admin Review";
     return "Admin Review";
   }
 
@@ -220,72 +220,28 @@ export default function ServicesPage() {
             <Link href="/services" className="text-yellow-300">
               Services
             </Link>
+
             <Link href="/accounts" className="hover:text-white">
               Accounts
             </Link>
+
             <Link href="/pins" className="hover:text-white">
               Pins
             </Link>
+
             <Link href="/dashboard" className="hover:text-white">
               Dashboard
-            </Link>
-            <Link href="/login" className="hover:text-white">
-              Login
             </Link>
           </div>
 
           <Link
-            href="/register"
+            href="/dashboard"
             className="rounded-xl bg-yellow-400 px-4 py-2 text-sm font-bold text-black hover:bg-yellow-300"
           >
-            Get Started
+            My Dashboard
           </Link>
         </div>
       </nav>
-
-      <section className="border-b border-zinc-900 bg-[#181821]">
-        <div className="mx-auto flex max-w-7xl items-center gap-8 overflow-x-auto px-6 py-5 text-sm">
-          <span className="rounded bg-yellow-400 px-2 py-1 font-bold text-black">
-            BS
-          </span>
-
-          <Link
-            href="/services"
-            className="whitespace-nowrap border-b-2 border-yellow-400 pb-4 text-white"
-          >
-            Boosting
-          </Link>
-
-          <button
-            type="button"
-            onClick={() => resetFieldsForTab("Coaching")}
-            className="whitespace-nowrap pb-4 text-zinc-400 hover:text-white"
-          >
-            Coaching
-          </button>
-
-          <Link
-            href="/accounts"
-            className="whitespace-nowrap pb-4 text-zinc-400 hover:text-white"
-          >
-            Accounts
-          </Link>
-
-          <Link
-            href="/pins"
-            className="whitespace-nowrap pb-4 text-zinc-400 hover:text-white"
-          >
-            Exclusive Pins
-          </Link>
-
-          <Link
-            href="/dashboard"
-            className="whitespace-nowrap pb-4 text-zinc-400 hover:text-white"
-          >
-            Order Tracking
-          </Link>
-        </div>
-      </section>
 
       <section className="relative overflow-hidden">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,_rgba(250,204,21,0.16),_transparent_35%),radial-gradient(circle_at_left,_rgba(59,130,246,0.10),_transparent_30%)]" />
@@ -294,7 +250,7 @@ export default function ServicesPage() {
           <div className="flex flex-col gap-8 lg:flex-row lg:items-end lg:justify-between">
             <div>
               <p className="text-sm font-semibold text-yellow-300">
-                Brawl Stars Boosting Service
+                Brawl Stars Services
               </p>
 
               <h1 className="mt-4 max-w-3xl text-4xl font-bold tracking-tight md:text-6xl">

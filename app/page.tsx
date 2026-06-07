@@ -12,15 +12,15 @@ const services = [
       "Request coaching support, gameplay review, or strategy guidance based on your current level.",
   },
   {
-    title: "Order Tracking Dashboard",
+    title: "Accounts & Pins",
     description:
-      "Track assigned orders, request status, credits, admin updates, and chat messages from your dashboard.",
+      "Browse account listings and exclusive pin listings, then submit purchase requests for admin review.",
   },
 ];
 
 const steps = [
-  "Create an account",
-  "Submit a service request",
+  "Browse services or listings",
+  "Submit a request",
   "Admin reviews your request",
   "Track progress from dashboard",
 ];
@@ -42,17 +42,24 @@ export default function Home() {
           </Link>
 
           <Link
-            href="/login"
-            className="rounded-xl border border-zinc-700 px-4 py-2 text-sm font-semibold text-zinc-200 hover:bg-zinc-900"
+            href="/accounts"
+            className="hidden rounded-xl border border-zinc-700 px-4 py-2 text-sm font-semibold text-zinc-200 hover:bg-zinc-900 sm:inline-block"
           >
-            Login
+            Accounts
           </Link>
 
           <Link
-            href="/register"
+            href="/pins"
+            className="hidden rounded-xl border border-zinc-700 px-4 py-2 text-sm font-semibold text-zinc-200 hover:bg-zinc-900 sm:inline-block"
+          >
+            Pins
+          </Link>
+
+          <Link
+            href="/dashboard"
             className="rounded-xl bg-yellow-400 px-4 py-2 text-sm font-bold text-black hover:bg-yellow-300"
           >
-            Get Started
+            My Dashboard
           </Link>
         </div>
       </nav>
@@ -64,29 +71,16 @@ export default function Home() {
           </p>
 
           <h1 className="mt-6 text-5xl font-bold tracking-tight md:text-7xl">
-            Submit requests and track orders like a real dashboard.
+            Submit requests and track everything from one dashboard.
           </h1>
 
           <p className="mt-6 max-w-xl text-lg leading-8 text-zinc-300">
-            Booster Lounge lets users submit service requests, view assigned
-            orders, track progress, manage credits, and chat with the admin in
-            one clean dashboard.
+            Booster Lounge lets users submit boosting requests, browse account
+            and pin listings, view assigned orders, track progress, manage
+            credits, and chat with admin.
           </p>
 
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-            <Link
-              href="/accounts"
-              className="hidden rounded-xl border border-zinc-700 px-4 py-2 text-sm font-semibold text-zinc-200 hover:bg-zinc-900 sm:inline-block"
-            >
-              Accounts
-            </Link>
-
-            <Link
-              href="/pins"
-              className="hidden rounded-xl border border-zinc-700 px-4 py-2 text-sm font-semibold text-zinc-200 hover:bg-zinc-900 sm:inline-block"
-            >
-              Pins
-            </Link>
             <Link
               href="/services"
               className="rounded-xl bg-yellow-400 px-6 py-3 text-center font-bold text-black hover:bg-yellow-300"
@@ -95,10 +89,17 @@ export default function Home() {
             </Link>
 
             <Link
+              href="/accounts"
+              className="rounded-xl border border-zinc-700 px-6 py-3 text-center font-bold text-white hover:bg-zinc-900"
+            >
+              Browse Accounts
+            </Link>
+
+            <Link
               href="/dashboard"
               className="rounded-xl border border-zinc-700 px-6 py-3 text-center font-bold text-white hover:bg-zinc-900"
             >
-              Dashboard
+              My Dashboard
             </Link>
           </div>
 
@@ -156,10 +157,10 @@ export default function Home() {
 
       <section className="mx-auto max-w-6xl px-6 py-16">
         <div className="max-w-2xl">
-          <h2 className="text-3xl font-bold">Services</h2>
+          <h2 className="text-3xl font-bold">What you can do</h2>
           <p className="mt-3 text-zinc-400">
-            Users can submit service requests. Admins review requests, assign
-            orders, and update progress from the admin panel.
+            Submit service requests, browse listings, and track all accepted
+            orders through your dashboard.
           </p>
         </div>
 
@@ -177,12 +178,19 @@ export default function Home() {
           ))}
         </div>
 
-        <div className="mt-8">
+        <div className="mt-8 flex flex-wrap gap-3">
           <Link
             href="/services"
             className="inline-flex rounded-xl bg-yellow-400 px-6 py-3 font-bold text-black hover:bg-yellow-300"
           >
             Browse Services
+          </Link>
+
+          <Link
+            href="/pins"
+            className="inline-flex rounded-xl border border-zinc-700 px-6 py-3 font-bold text-white hover:bg-zinc-900"
+          >
+            Browse Pins
           </Link>
         </div>
       </section>
@@ -212,8 +220,8 @@ export default function Home() {
         <div className="rounded-3xl border border-yellow-400/30 bg-yellow-400/10 p-8">
           <h2 className="text-3xl font-bold">Ready to submit a request?</h2>
           <p className="mt-3 max-w-2xl text-zinc-300">
-            Pick your service type, choose your current and desired rank, add
-            notes, and submit it for admin review.
+            Pick your service type, choose your target details, add notes, and
+            submit it for admin review.
           </p>
 
           <div className="mt-6 flex flex-col gap-3 sm:flex-row">
@@ -225,10 +233,10 @@ export default function Home() {
             </Link>
 
             <Link
-              href="/register"
+              href="/dashboard"
               className="rounded-xl border border-zinc-700 px-6 py-3 text-center font-bold text-white hover:bg-zinc-900"
             >
-              Create Account
+              My Dashboard
             </Link>
           </div>
         </div>
