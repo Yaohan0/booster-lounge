@@ -26,65 +26,101 @@ export default function LoginPage() {
     }
 
     const {
-        data: { user },
+      data: { user },
     } = await supabase.auth.getUser();
 
     if (user) {
-    const { data: profile } = await supabase
+      const { data: profile } = await supabase
         .from("profiles")
         .select("role")
         .eq("id", user.id)
         .single();
 
-    if (profile?.role === "admin") {
+      if (profile?.role === "admin") {
         router.push("/admin");
         return;
-    }
+      }
     }
 
     router.push("/dashboard");
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-zinc-950 px-6 text-white">
-      <form
-        onSubmit={handleLogin}
-        className="w-full max-w-md rounded-xl border border-zinc-800 bg-zinc-900 p-8"
-      >
-        <h1 className="text-3xl font-bold">Login</h1>
-        <p className="mt-2 text-sm text-zinc-400">
-          Access your Booster Lounge dashboard.
-        </p>
+    <main className="min-h-screen bg-[radial-gradient(circle_at_top,_#27272a,_#09090b_55%)] px-6 py-10 text-white">
+      <nav className="mx-auto flex max-w-6xl items-center justify-between">
+        <Link href="/" className="text-xl font-bold text-yellow-400">
+          Booster Lounge
+        </Link>
 
-        <input
-          className="mt-6 w-full rounded bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
-          type="email"
-          placeholder="Email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          required
-        />
+        <Link
+          href="/register"
+          className="rounded-xl bg-yellow-400 px-4 py-2 text-sm font-bold text-black hover:bg-yellow-300"
+        >
+          Create Account
+        </Link>
+      </nav>
 
-        <input
-          className="mt-4 w-full rounded bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
-          type="password"
-          placeholder="Password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-        />
+      <section className="mx-auto mt-20 grid max-w-6xl items-center gap-10 lg:grid-cols-2">
+        <div>
+          <p className="inline-flex rounded-full border border-yellow-400/40 bg-yellow-400/10 px-4 py-2 text-sm font-semibold text-yellow-300">
+            Welcome back
+          </p>
 
-        <button className="mt-6 w-full rounded bg-yellow-400 p-3 font-bold text-black">
-          Login
-        </button>
+          <h1 className="mt-6 text-5xl font-bold tracking-tight">
+            Login to your dashboard.
+          </h1>
 
-        <p className="mt-6 text-sm text-zinc-400">
-          No account?{" "}
-          <Link href="/register" className="text-yellow-400">
-            Register
-          </Link>
-        </p>
-      </form>
+          <p className="mt-5 max-w-xl text-zinc-400">
+            Track assigned orders, view credit balance, and continue admin/user
+            chat from your account.
+          </p>
+        </div>
+
+        <form
+          onSubmit={handleLogin}
+          className="rounded-3xl border border-zinc-800 bg-zinc-950/80 p-8 shadow-2xl"
+        >
+          <h2 className="text-3xl font-bold">Login</h2>
+          <p className="mt-2 text-sm text-zinc-400">
+            Enter your email and password to continue.
+          </p>
+
+          <label className="mt-6 block text-sm font-medium text-zinc-300">
+            Email
+          </label>
+          <input
+            className="mt-2 w-full rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
+            type="email"
+            placeholder="you@example.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+          />
+
+          <label className="mt-4 block text-sm font-medium text-zinc-300">
+            Password
+          </label>
+          <input
+            className="mt-2 w-full rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
+            type="password"
+            placeholder="Your password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+          />
+
+          <button className="mt-6 w-full rounded-xl bg-yellow-400 p-3 font-bold text-black hover:bg-yellow-300">
+            Login
+          </button>
+
+          <p className="mt-6 text-center text-sm text-zinc-400">
+            No account?{" "}
+            <Link href="/register" className="font-semibold text-yellow-400">
+              Register
+            </Link>
+          </p>
+        </form>
+      </section>
     </main>
   );
 }

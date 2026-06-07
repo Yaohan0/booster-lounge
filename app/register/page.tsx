@@ -32,48 +32,93 @@ export default function RegisterPage() {
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-zinc-950 px-6 text-white">
-      <form
-        onSubmit={handleRegister}
-        className="w-full max-w-md rounded-xl border border-zinc-800 bg-zinc-900 p-8"
-      >
-        <h1 className="text-3xl font-bold">Create account</h1>
-        <p className="mt-2 text-sm text-zinc-400">
-          Register with email to start creating orders.
-        </p>
+    <main className="min-h-screen bg-[radial-gradient(circle_at_top,_#27272a,_#09090b_55%)] px-6 py-10 text-white">
+      <nav className="mx-auto flex max-w-6xl items-center justify-between">
+        <Link href="/" className="text-xl font-bold text-yellow-400">
+          Booster Lounge
+        </Link>
 
-        <input
-          className="mt-6 w-full rounded bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
-          type="email"
-          placeholder="Email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          required
-        />
+        <Link
+          href="/login"
+          className="rounded-xl border border-zinc-700 px-4 py-2 text-sm font-semibold text-zinc-200 hover:bg-zinc-900"
+        >
+          Login
+        </Link>
+      </nav>
 
-        <input
-          className="mt-4 w-full rounded bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
-          type="password"
-          placeholder="Password, minimum 8 characters"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-          minLength={8}
-        />
+      <section className="mx-auto mt-20 grid max-w-6xl items-center gap-10 lg:grid-cols-2">
+        <div>
+          <p className="inline-flex rounded-full border border-yellow-400/40 bg-yellow-400/10 px-4 py-2 text-sm font-semibold text-yellow-300">
+            Create your account
+          </p>
 
-        <button className="mt-6 w-full rounded bg-yellow-400 p-3 font-bold text-black">
-          Register
-        </button>
+          <h1 className="mt-6 text-5xl font-bold tracking-tight">
+            Start tracking your orders.
+          </h1>
 
-        {message && <p className="mt-4 text-sm text-zinc-300">{message}</p>}
+          <p className="mt-5 max-w-xl text-zinc-400">
+            Register to view assigned orders, credit balance, order status, and
+            admin chat updates from one dashboard.
+          </p>
 
-        <p className="mt-6 text-sm text-zinc-400">
-          Already have an account?{" "}
-          <Link href="/login" className="text-yellow-400">
-            Login
-          </Link>
-        </p>
-      </form>
+          <div className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-950/70 p-5 text-sm text-zinc-400">
+            Do not submit Supercell ID passwords, email passwords, 2FA codes, or
+            recovery information.
+          </div>
+        </div>
+
+        <form
+          onSubmit={handleRegister}
+          className="rounded-3xl border border-zinc-800 bg-zinc-950/80 p-8 shadow-2xl"
+        >
+          <h2 className="text-3xl font-bold">Create account</h2>
+          <p className="mt-2 text-sm text-zinc-400">
+            Use your email to create a Booster Lounge account.
+          </p>
+
+          <label className="mt-6 block text-sm font-medium text-zinc-300">
+            Email
+          </label>
+          <input
+            className="mt-2 w-full rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
+            type="email"
+            placeholder="you@example.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+          />
+
+          <label className="mt-4 block text-sm font-medium text-zinc-300">
+            Password
+          </label>
+          <input
+            className="mt-2 w-full rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
+            type="password"
+            placeholder="Minimum 8 characters"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+            minLength={8}
+          />
+
+          <button className="mt-6 w-full rounded-xl bg-yellow-400 p-3 font-bold text-black hover:bg-yellow-300">
+            Register
+          </button>
+
+          {message && (
+            <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900 p-3 text-sm text-zinc-300">
+              {message}
+            </div>
+          )}
+
+          <p className="mt-6 text-center text-sm text-zinc-400">
+            Already have an account?{" "}
+            <Link href="/login" className="font-semibold text-yellow-400">
+              Login
+            </Link>
+          </p>
+        </form>
+      </section>
     </main>
   );
 }
