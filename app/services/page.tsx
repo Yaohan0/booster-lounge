@@ -5,11 +5,19 @@ import { useMemo, useState } from "react";
 import { createClient } from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
 
-const serviceTabs = [
+type ServiceType =
+  | "Rank Boost"
+  | "Trophy Boost"
+  | "Prestige Icon"
+  | "Coaching"
+  | "Custom Request";
+
+type OrderMode = "Boost" | "Carry";
+
+const serviceTabs: ServiceType[] = [
   "Rank Boost",
   "Trophy Boost",
   "Prestige Icon",
-  "Brawlers Rank",
   "Coaching",
   "Custom Request",
 ];
@@ -36,29 +44,62 @@ const allRanks = [
   "Masters III",
 ];
 
-const targetRanks = [
-  "Mythic I",
-  "Mythic II",
-  "Mythic III",
-  "Legendary I",
-  "Legendary II",
-  "Legendary III",
-  "Masters I",
-  "Masters II",
-  "Masters III",
-];
-
 const prestigeOptions = ["Prestige 1", "Prestige 2", "Prestige 3"];
+
+const coachingDurations = ["15 mins", "30 mins", "1 hour"];
+
+const rankIcons: Record<string, string> = {
+  "Bronze I": "🥉",
+  "Bronze II": "🥉",
+  "Bronze III": "🥉",
+  "Silver I": "⚪",
+  "Silver II": "⚪",
+  "Silver III": "⚪",
+  "Gold I": "🟡",
+  "Gold II": "🟡",
+  "Gold III": "🟡",
+  Diamond: "💎",
+  "Mythic I": "🔮",
+  "Mythic II": "🔮",
+  "Mythic III": "🔮",
+  "Legendary I": "👑",
+  "Legendary II": "👑",
+  "Legendary III": "👑",
+  "Masters I": "🏆",
+  "Masters II": "🏆",
+  "Masters III": "🏆",
+};
+
+function getHigherRanks(currentRank: string) {
+  const currentIndex = allRanks.indexOf(currentRank);
+
+  if (currentIndex === -1) {
+    return allRanks;
+  }
+
+  const higherRanks = allRanks.slice(currentIndex + 1);
+
+  if (higherRanks.length === 0) {
+    return [currentRank];
+  }
+
+  return higherRanks;
+}
+
+function getDefaultTargetRank(currentRank: string) {
+  const higherRanks = getHigherRanks(currentRank);
+  return higherRanks[0] ?? currentRank;
+}
 
 export default function ServicesPage() {
   const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
 
-  const [serviceType, setServiceType] = useState("Rank Boost");
-  const [orderMode, setOrderMode] = useState<"Boost" | "Carry">("Boost");
+  const [serviceType, setServiceType] = useState<ServiceType>("Rank Boost");
+  const [orderMode, setOrderMode] = useState<OrderMode>("Boost");
 
   const [currentRank, setCurrentRank] = useState("Bronze I");
-  const [targetRank, setTargetRank] = useState("Mythic I");
+  const [targetRank, setTargetRank] = useState("Bronze II");
 
   const [currentTrophies, setCurrentTrophies] = useState("");
   const [targetTrophies, setTargetTrophies] = useState("");
@@ -68,13 +109,30 @@ export default function ServicesPage() {
   const [brawlerTrophies, setBrawlerTrophies] = useState("");
   const [prestigeTarget, setPrestigeTarget] = useState("Prestige 1");
 
+  const [coachingFocus, setCoachingFocus] = useState("");
+  const [coachingDuration, setCoachingDuration] = useState("30 mins");
+
   const [tag, setTag] = useState("");
   const [notes, setNotes] = useState("");
 
   const [express, setExpress] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  function resetFieldsForTab(tab: string) {
+  const availableTargetRanks = getHigherRanks(currentRank);
+
+  function changeCurrentRank(nextRank: string) {
+    setCurrentRank(nextRank);
+
+    const higherRanks = getHigherRanks(nextRank);
+    const currentTargetIndex = allRanks.indexOf(targetRank);
+    const nextRankIndex = allRanks.indexOf(nextRank);
+
+    if (currentTargetIndex <= nextRankIndex) {
+      setTargetRank(higherRanks[0] ?? nextRank);
+    }
+  }
+
+  function resetFieldsForTab(tab: ServiceType) {
     setServiceType(tab);
     setOrderMode("Boost");
     setExpress(false);
@@ -83,7 +141,7 @@ export default function ServicesPage() {
 
     if (tab === "Rank Boost") {
       setCurrentRank("Bronze I");
-      setTargetRank("Mythic I");
+      setTargetRank("Bronze II");
     }
 
     if (tab === "Trophy Boost") {
@@ -99,14 +157,9 @@ export default function ServicesPage() {
       setBrawlerTrophies("");
     }
 
-    if (tab === "Brawlers Rank") {
-      setCurrentRank("Bronze I");
-      setTargetRank("Mythic I");
-      setBrawler("");
-    }
-
     if (tab === "Coaching") {
-      setBrawler("");
+      setCoachingFocus("");
+      setCoachingDuration("30 mins");
     }
 
     if (tab === "Custom Request") {
@@ -118,10 +171,7 @@ export default function ServicesPage() {
     if (serviceType === "Rank Boost") return currentRank;
     if (serviceType === "Trophy Boost") return currentTrophies || "N/A";
     if (serviceType === "Prestige Icon") return brawler || "N/A";
-    if (serviceType === "Brawlers Rank") {
-      return `${brawler || "Brawler"} - ${currentRank}`;
-    }
-    if (serviceType === "Coaching") return brawler || "Gameplay Review";
+    if (serviceType === "Coaching") return coachingFocus || "Coaching Review";
     return "Custom";
   }
 
@@ -129,7 +179,7 @@ export default function ServicesPage() {
     if (serviceType === "Rank Boost") return targetRank;
     if (serviceType === "Trophy Boost") return targetTrophies || "N/A";
     if (serviceType === "Prestige Icon") return prestigeTarget;
-    if (serviceType === "Brawlers Rank") return targetRank;
+    if (serviceType === "Coaching") return coachingDuration;
     return "Admin Review";
   }
 
@@ -162,14 +212,9 @@ export default function ServicesPage() {
       lines.push(`Brawler Trophies: ${brawlerTrophies || "Not provided"}`);
     }
 
-    if (serviceType === "Brawlers Rank") {
-      lines.push(`Brawler: ${brawler || "Not provided"}`);
-      lines.push(`Current Rank: ${currentRank}`);
-      lines.push(`Target Rank: ${targetRank}`);
-    }
-
     if (serviceType === "Coaching") {
-      lines.push(`Brawler: ${brawler || "Not provided"}`);
+      lines.push(`Areas to Work On: ${coachingFocus || "Not provided"}`);
+      lines.push(`Duration: ${coachingDuration}`);
     }
 
     return lines.join("\n");
@@ -220,15 +265,15 @@ export default function ServicesPage() {
             <Link href="/services" className="text-yellow-300">
               Services
             </Link>
-
             <Link href="/accounts" className="hover:text-white">
               Accounts
             </Link>
-
             <Link href="/pins" className="hover:text-white">
               Pins
             </Link>
-
+            <Link href="/offers" className="hover:text-white">
+              Offers
+            </Link>
             <Link href="/dashboard" className="hover:text-white">
               Dashboard
             </Link>
@@ -297,9 +342,10 @@ export default function ServicesPage() {
               <ServiceForm
                 serviceType={serviceType}
                 currentRank={currentRank}
-                setCurrentRank={setCurrentRank}
+                setCurrentRank={changeCurrentRank}
                 targetRank={targetRank}
                 setTargetRank={setTargetRank}
+                availableTargetRanks={availableTargetRanks}
                 currentTrophies={currentTrophies}
                 setCurrentTrophies={setCurrentTrophies}
                 targetTrophies={targetTrophies}
@@ -312,13 +358,17 @@ export default function ServicesPage() {
                 setBrawlerTrophies={setBrawlerTrophies}
                 prestigeTarget={prestigeTarget}
                 setPrestigeTarget={setPrestigeTarget}
+                coachingFocus={coachingFocus}
+                setCoachingFocus={setCoachingFocus}
+                coachingDuration={coachingDuration}
+                setCoachingDuration={setCoachingDuration}
               />
 
               <div className="rounded-3xl border border-zinc-800 bg-zinc-950/80 p-6">
                 <h2 className="text-xl font-bold">Request Notes</h2>
                 <p className="mt-1 text-sm text-zinc-400">
-                  Add any useful details. Do not include passwords, 2FA codes,
-                  or recovery information.
+                  Add useful details. Do not include passwords, 2FA codes, email
+                  access, or recovery information.
                 </p>
 
                 <textarea
@@ -377,7 +427,7 @@ export default function ServicesPage() {
                       label="Rank Boost Selection"
                       value={targetRank}
                       onChange={setTargetRank}
-                      options={targetRanks}
+                      options={availableTargetRanks}
                     />
                   )}
 
@@ -421,30 +471,22 @@ export default function ServicesPage() {
                     </>
                   )}
 
-                  {serviceType === "Brawlers Rank" && (
+                  {serviceType === "Coaching" && (
                     <>
                       <TextField
-                        label="Brawler"
-                        value={brawler}
-                        onChange={setBrawler}
-                        placeholder="e.g. Piper"
+                        label="Areas to Work On"
+                        value={coachingFocus}
+                        onChange={setCoachingFocus}
+                        placeholder="e.g. positioning, drafting, aim, map control"
                       />
+
                       <SelectField
-                        label="Target Rank"
-                        value={targetRank}
-                        onChange={setTargetRank}
-                        options={targetRanks}
+                        label="Duration"
+                        value={coachingDuration}
+                        onChange={setCoachingDuration}
+                        options={coachingDurations}
                       />
                     </>
-                  )}
-
-                  {serviceType === "Coaching" && (
-                    <TextField
-                      label="Brawler"
-                      value={brawler}
-                      onChange={setBrawler}
-                      placeholder="e.g. Piper"
-                    />
                   )}
 
                   <TextField
@@ -493,11 +535,12 @@ export default function ServicesPage() {
 }
 
 type ServiceFormProps = {
-  serviceType: string;
+  serviceType: ServiceType;
   currentRank: string;
   setCurrentRank: (value: string) => void;
   targetRank: string;
   setTargetRank: (value: string) => void;
+  availableTargetRanks: string[];
   currentTrophies: string;
   setCurrentTrophies: (value: string) => void;
   targetTrophies: string;
@@ -510,6 +553,10 @@ type ServiceFormProps = {
   setBrawlerTrophies: (value: string) => void;
   prestigeTarget: string;
   setPrestigeTarget: (value: string) => void;
+  coachingFocus: string;
+  setCoachingFocus: (value: string) => void;
+  coachingDuration: string;
+  setCoachingDuration: (value: string) => void;
 };
 
 function ServiceForm(props: ServiceFormProps) {
@@ -521,17 +568,13 @@ function ServiceForm(props: ServiceFormProps) {
           value={props.currentRank}
           options={allRanks}
           onChange={props.setCurrentRank}
-          icon="★"
-          color="bg-yellow-400 text-black"
         />
 
         <RankCard
           title="Desired Rank"
           value={props.targetRank}
-          options={targetRanks}
+          options={props.availableTargetRanks}
           onChange={props.setTargetRank}
-          icon="♛"
-          color="bg-blue-500 text-white"
         />
       </div>
     );
@@ -602,58 +645,38 @@ function ServiceForm(props: ServiceFormProps) {
     );
   }
 
-  if (props.serviceType === "Brawlers Rank") {
+  if (props.serviceType === "Coaching") {
     return (
-      <FormPanel title="Brawlers Rank">
-        <div className="grid gap-4 md:grid-cols-3">
+      <FormPanel title="Coaching">
+        <p className="mb-5 max-w-3xl text-zinc-300">
+          Request gameplay feedback, strategy review, drafting advice, or
+          improvement planning.
+        </p>
+
+        <div className="grid gap-4 md:grid-cols-2">
           <TextInput
-            label="Brawler"
-            value={props.brawler}
-            onChange={props.setBrawler}
-            placeholder="e.g. Piper"
+            label="Areas to work on"
+            value={props.coachingFocus}
+            onChange={props.setCoachingFocus}
+            placeholder="e.g. positioning, aiming, drafting, map control"
           />
 
           <SelectInput
-            label="Current rank"
-            value={props.currentRank}
-            onChange={props.setCurrentRank}
-            options={allRanks}
-          />
-
-          <SelectInput
-            label="Desired rank"
-            value={props.targetRank}
-            onChange={props.setTargetRank}
-            options={targetRanks}
+            label="Session duration"
+            value={props.coachingDuration}
+            onChange={props.setCoachingDuration}
+            options={coachingDurations}
           />
         </div>
       </FormPanel>
     );
   }
 
-  if (props.serviceType === "Coaching") {
-    return (
-      <FormPanel title="Coaching">
-        <p className="mb-5 max-w-3xl text-zinc-300">
-          Request gameplay feedback, coaching advice, or strategy review. Add
-          your details in the notes section below.
-        </p>
-
-        <TextInput
-          label="Brawler"
-          value={props.brawler}
-          onChange={props.setBrawler}
-          placeholder="e.g. Piper, Edgar, Shelly"
-        />
-      </FormPanel>
-    );
-  }
-
   return (
     <FormPanel title="Custom Request">
-      <p className="mb-5 max-w-3xl text-zinc-300">
-        Have something in mind that does not match the standard categories? Add
-        your request details below and admin will review it.
+      <p className="max-w-3xl text-zinc-300">
+        Have something that does not match the standard categories? Add your
+        request details in the notes section and admin will review it.
       </p>
     </FormPanel>
   );
@@ -664,24 +687,16 @@ function RankCard({
   value,
   options,
   onChange,
-  icon,
-  color,
 }: {
   title: string;
   value: string;
   options: string[];
   onChange: (value: string) => void;
-  icon: string;
-  color: string;
 }) {
   return (
     <div className="rounded-3xl border border-zinc-800 bg-zinc-950/80 p-6">
       <div className="mb-6 flex items-center gap-4">
-        <div
-          className={`flex h-16 w-16 items-center justify-center rounded-2xl text-3xl ${color}`}
-        >
-          {icon}
-        </div>
+        <RankIcon rank={value} />
 
         <div>
           <p className="text-sm text-zinc-400">{title}</p>
@@ -699,6 +714,14 @@ function RankCard({
           <option key={option}>{option}</option>
         ))}
       </select>
+    </div>
+  );
+}
+
+function RankIcon({ rank }: { rank: string }) {
+  return (
+    <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-yellow-400/30 bg-zinc-900 text-3xl shadow-lg shadow-yellow-400/10">
+      {rankIcons[rank] || "🏆"}
     </div>
   );
 }
@@ -769,13 +792,15 @@ function SelectInput({
   );
 }
 
-type ToggleRowProps = {
+function ToggleRow({
+  label,
+  enabled,
+  setEnabled,
+}: {
   label: string;
   enabled: boolean;
   setEnabled: (value: boolean) => void;
-};
-
-function ToggleRow({ label, enabled, setEnabled }: ToggleRowProps) {
+}) {
   return (
     <div className="flex items-center justify-between gap-4">
       <span className="text-sm font-semibold text-zinc-200">{label}</span>
