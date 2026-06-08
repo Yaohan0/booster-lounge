@@ -141,6 +141,8 @@ export default function ServicesPage() {
   const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
 
+  const requireVerifiedTag = process.env.NODE_ENV === "development";
+
   const [isAdmin, setIsAdmin] = useState(false);
 
   const [serviceType, setServiceType] = useState<ServiceType>("Rank Boost");
@@ -165,6 +167,7 @@ export default function ServicesPage() {
     null
   );
   const [verifyingTag, setVerifyingTag] = useState(false);
+  const [verificationWarning, setVerificationWarning] = useState("");
 
   const [notes, setNotes] = useState("");
   const [express, setExpress] = useState(false);
@@ -198,6 +201,7 @@ export default function ServicesPage() {
   function updateTag(value: string) {
     setTag(value);
     setVerifiedPlayer(null);
+    setVerificationWarning("");
   }
 
   function changeCurrentRank(nextRank: string) {
@@ -219,6 +223,7 @@ export default function ServicesPage() {
     setNotes("");
     setTag("");
     setVerifiedPlayer(null);
+    setVerificationWarning("");
 
     if (tab === "Rank Boost") {
       setCurrentRank("Bronze I");
@@ -273,7 +278,12 @@ export default function ServicesPage() {
       `Type: ${orderMode}`,
       `Express: ${express ? "Yes" : "No"}`,
       `Tag: ${normalizeTag(tag) || "Not provided"}`,
+      `Verification Status: ${verifiedPlayer ? "Verified" : "Unverified"}`,
     ];
+
+    if (verificationWarning && !verifiedPlayer) {
+      lines.push(`Verification Warning: ${verificationWarning}`);
+    }
 
     if (verifiedPlayer) {
       lines.push("");
@@ -338,12 +348,12 @@ export default function ServicesPage() {
       return false;
     }
 
-    if (!verifiedPlayer) {
+    if (requireVerifiedTag && !verifiedPlayer) {
       alert("Please verify your Brawl Stars player tag before submitting.");
       return false;
     }
 
-    if (normalizeTag(verifiedPlayer.tag) !== cleanTag) {
+    if (verifiedPlayer && normalizeTag(verifiedPlayer.tag) !== cleanTag) {
       alert("Your tag changed after verification. Please verify it again.");
       return false;
     }
@@ -411,6 +421,7 @@ export default function ServicesPage() {
 
     setVerifyingTag(true);
     setVerifiedPlayer(null);
+    setVerificationWarning("");
 
     try {
       const response = await fetch(
@@ -420,7 +431,16 @@ export default function ServicesPage() {
       const data = await response.json();
 
       if (!response.ok) {
-        alert(data.error || "Unable to verify player tag.");
+        const message =
+          data.error ||
+          "Unable to verify player tag. You may still submit the tag for manual admin review.";
+
+        setVerificationWarning(message);
+
+        if (requireVerifiedTag) {
+          alert(message);
+        }
+
         return;
       }
 
@@ -436,9 +456,18 @@ export default function ServicesPage() {
       });
 
       setTag(data.tag || cleanTag);
+      setVerificationWarning("");
     } catch (error) {
       console.error(error);
-      alert("Server error while verifying player tag.");
+
+      const message =
+        "Verification server is unavailable. You may still submit the tag for manual admin review.";
+
+      setVerificationWarning(message);
+
+      if (requireVerifiedTag) {
+        alert(message);
+      }
     } finally {
       setVerifyingTag(false);
     }
@@ -552,6 +581,14 @@ export default function ServicesPage() {
                 tag. Your request will be reviewed before becoming an active
                 order.
               </p>
+
+              {!requireVerifiedTag && (
+                <div className="mt-5 rounded-2xl border border-blue-400/30 bg-blue-400/10 p-4 text-sm text-blue-200">
+                  Production mode: tag verification is optional. If verification
+                  fails because of API IP restrictions, your request can still be
+                  submitted for manual admin review.
+                </div>
+              )}
 
               {isAdmin && (
                 <div className="mt-5 rounded-2xl border border-yellow-400/40 bg-yellow-400/10 p-4 text-sm text-yellow-200">
@@ -776,6 +813,19 @@ export default function ServicesPage() {
                       <p className="text-xs text-green-200">
                         {verifiedPlayer.tag}
                       </p>
+                    </div>
+                  )}
+
+                  {verificationWarning && !verifiedPlayer && (
+                    <div className="rounded-2xl border border-yellow-400/30 bg-yellow-400/10 p-4 text-sm text-yellow-200">
+                      <p className="font-bold">Verification unavailable</p>
+                      <p className="mt-1">{verificationWarning}</p>
+                      {!requireVerifiedTag && (
+                        <p className="mt-2 text-xs text-yellow-100">
+                          You can still submit this request. Admin will verify
+                          the tag manually.
+                        </p>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1419,9 +1469,10 @@ function TrustPanel() {
         </div>
 
         <div className="rounded-2xl bg-zinc-900 p-4">
-          <p className="font-semibold">Verified player tag</p>
+          <p className="font-semibold">Verified when available</p>
           <p className="mt-1 text-sm text-zinc-500">
-            Requests require a valid Brawl Stars player tag before submission.
+            Local testing requires API verification. Production allows manual
+            admin review if API verification is unavailable.
           </p>
         </div>
       </div>
