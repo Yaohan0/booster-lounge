@@ -72,6 +72,10 @@ export default function PageShell({
               Offers
             </Link>
 
+            <Link href="/market" className="text-zinc-300 hover:text-white">
+              Market
+            </Link>
+
             <Link href="/dashboard" className="text-zinc-300 hover:text-white">
               Dashboard
             </Link>

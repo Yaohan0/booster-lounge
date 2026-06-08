@@ -1,11 +1,10 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabaseClient";
 
-type ProductCategory = "accounts" | "pins" | "offers";
+type ProductCategory = "accounts" | "pins" | "offers" | "market";
+type MarketType = "In-game Items" | "Finger Sleeves" | "Keychains";
 
 type Product = {
   id: string;
@@ -19,600 +18,761 @@ type Product = {
   rank_icon_url: string | null;
   delivery_time: string | null;
   is_active: boolean | null;
-  created_at?: string;
+  created_at: string;
 };
 
-type MarketplacePageProps = {
+type ProductForm = {
   category: ProductCategory;
+  market_type: MarketType;
   title: string;
-  subtitle: string;
-  searchPlaceholder: string;
+  description: string;
+  price: string;
+  tags: string;
+  image_url: string;
+  video_url: string;
+  rank_icon_url: string;
+  delivery_time: string;
+  is_active: boolean;
 };
 
-const popularSearches: Record<ProductCategory, string[]> = {
-  accounts: [
-    "100K",
-    "Masters",
-    "Pro Rank",
-    "All Brawlers",
-    "Prestige",
-    "Legendary",
-    "50K",
-    "Max",
-  ],
-  pins: [
-    "Exclusive",
-    "Rare",
-    "Collector",
-    "Bundle",
-    "Limited",
-    "Cosmetic",
-    "Pin Pack",
-  ],
-  offers: [
-    "Rank Boost",
-    "Coaching",
-    "Bundle",
-    "Limited",
-    "Discount",
-    "Pins",
-    "Starter",
-  ],
+const emptyForm: ProductForm = {
+  category: "market",
+  market_type: "Finger Sleeves",
+  title: "",
+  description: "",
+  price: "",
+  tags: "",
+  image_url: "",
+  video_url: "",
+  rank_icon_url: "",
+  delivery_time: "Manual review",
+  is_active: true,
 };
 
 const categoryLabels: Record<ProductCategory, string> = {
-  accounts: "Account Purchase",
-  pins: "Exclusive Pins",
-  offers: "Special Offer",
+  accounts: "Accounts",
+  pins: "Pins",
+  offers: "Offers",
+  market: "Market",
 };
 
 const categoryIcons: Record<ProductCategory, string> = {
   accounts: "🎮",
   pins: "📌",
   offers: "🔥",
+  market: "🛒",
 };
 
-export default function MarketplacePage({
-  category,
-  title,
-  subtitle,
-  searchPlaceholder,
-}: MarketplacePageProps) {
+const marketTypes: MarketType[] = [
+  "In-game Items",
+  "Finger Sleeves",
+  "Keychains",
+];
+
+function inferMarketType(tags: string[] | null): MarketType {
+  const values = tags ?? [];
+
+  if (values.some((tag) => tag.toLowerCase() === "in-game items")) {
+    return "In-game Items";
+  }
+
+  if (values.some((tag) => tag.toLowerCase() === "keychains")) {
+    return "Keychains";
+  }
+
+  return "Finger Sleeves";
+}
+
+export default function AdminProductManager() {
   const supabase = useMemo(() => createClient(), []);
-  const router = useRouter();
 
   const [products, setProducts] = useState<Product[]>([]);
-  const [isAdmin, setIsAdmin] = useState(false);
-
+  const [form, setForm] = useState<ProductForm>(emptyForm);
+  const [editingId, setEditingId] = useState("");
+  const [activeCategory, setActiveCategory] =
+    useState<ProductCategory>("market");
   const [search, setSearch] = useState("");
-  const [sort, setSort] = useState("recommended");
   const [loading, setLoading] = useState(true);
 
-  const [minPrice, setMinPrice] = useState("");
-  const [maxPrice, setMaxPrice] = useState("");
-  const [quickPrice, setQuickPrice] = useState("");
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [uploadingRankIcon, setUploadingRankIcon] = useState(false);
 
   useEffect(() => {
-    async function loadMarketplace() {
-      setLoading(true);
+    loadProducts();
+  }, []);
 
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+  async function loadProducts() {
+    setLoading(true);
 
-      if (user) {
-        const { data: profile } = await supabase
-          .from("profiles")
-          .select("role")
-          .eq("id", user.id)
-          .single();
+    const { data, error } = await supabase
+      .from("products")
+      .select("*")
+      .order("created_at", { ascending: false });
 
-        setIsAdmin(profile?.role === "admin");
+    if (error) {
+      alert(error.message);
+      setLoading(false);
+      return;
+    }
+
+    setProducts((data ?? []) as Product[]);
+    setLoading(false);
+  }
+
+  function updateForm<K extends keyof ProductForm>(
+    key: K,
+    value: ProductForm[K]
+  ) {
+    setForm((prev) => ({
+      ...prev,
+      [key]: value,
+    }));
+  }
+
+  function parseTags(tags: string, category: ProductCategory) {
+    const baseTags = tags
+      .split(",")
+      .map((tag) => tag.trim())
+      .filter(Boolean);
+
+    if (category === "market") {
+      const withoutDuplicateMarketType = baseTags.filter(
+        (tag) => tag.toLowerCase() !== form.market_type.toLowerCase()
+      );
+
+      return ["Market", form.market_type, ...withoutDuplicateMarketType];
+    }
+
+    return baseTags;
+  }
+
+  function resetForm() {
+    setForm({
+      ...emptyForm,
+      category: activeCategory,
+    });
+    setEditingId("");
+  }
+
+  function cleanFileName(fileName: string) {
+    return fileName
+      .toLowerCase()
+      .replace(/[^a-z0-9.]+/g, "-")
+      .replace(/-+/g, "-");
+  }
+
+  async function uploadProductFile(
+    file: File,
+    targetField: "image_url" | "rank_icon_url"
+  ) {
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      alert("Please upload an image file.");
+      return;
+    }
+
+    const maxSizeMb = 5;
+    const maxSizeBytes = maxSizeMb * 1024 * 1024;
+
+    if (file.size > maxSizeBytes) {
+      alert(`Image is too large. Keep it under ${maxSizeMb}MB.`);
+      return;
+    }
+
+    if (targetField === "image_url") {
+      setUploadingImage(true);
+    } else {
+      setUploadingRankIcon(true);
+    }
+
+    const safeName = cleanFileName(file.name);
+    const folder = targetField === "image_url" ? "listing-images" : "rank-icons";
+    const filePath = `${folder}/${form.category}/${Date.now()}-${safeName}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from("product-images")
+      .upload(filePath, file, {
+        cacheControl: "3600",
+        upsert: false,
+      });
+
+    if (uploadError) {
+      alert(uploadError.message);
+
+      if (targetField === "image_url") {
+        setUploadingImage(false);
       } else {
-        setIsAdmin(false);
+        setUploadingRankIcon(false);
       }
 
-      const { data, error } = await supabase
+      return;
+    }
+
+    const { data } = supabase.storage
+      .from("product-images")
+      .getPublicUrl(filePath);
+
+    updateForm(targetField, data.publicUrl);
+
+    if (targetField === "image_url") {
+      setUploadingImage(false);
+    } else {
+      setUploadingRankIcon(false);
+    }
+  }
+
+  async function saveProduct(e: React.FormEvent) {
+    e.preventDefault();
+
+    if (!form.title.trim()) {
+      alert("Product title is required.");
+      return;
+    }
+
+    const payload = {
+      category: form.category,
+      title: form.title.trim(),
+      description: form.description.trim() || null,
+      price: Number(form.price || 0),
+      tags: parseTags(form.tags, form.category),
+      image_url: form.image_url.trim() || null,
+      video_url: form.video_url.trim() || null,
+      rank_icon_url:
+        form.category === "accounts" || form.category === "market"
+          ? null
+          : form.rank_icon_url.trim() || null,
+      delivery_time: form.delivery_time.trim() || "Manual review",
+      is_active: form.is_active,
+      updated_at: new Date().toISOString(),
+    };
+
+    if (editingId) {
+      const { error } = await supabase
         .from("products")
-        .select("*")
-        .eq("category", category)
-        .eq("is_active", true)
-        .order("created_at", { ascending: false });
+        .update(payload)
+        .eq("id", editingId);
 
       if (error) {
         alert(error.message);
-        setLoading(false);
         return;
       }
+    } else {
+      const { error } = await supabase.from("products").insert(payload);
 
-      setProducts((data ?? []) as Product[]);
-      setLoading(false);
+      if (error) {
+        alert(error.message);
+        return;
+      }
     }
 
-    loadMarketplace();
-  }, [category, supabase]);
-
-  function matchesPrice(product: Product) {
-    const price = Number(product.price ?? 0);
-
-    if (quickPrice === "0-70") return price >= 0 && price <= 70;
-    if (quickPrice === "70-200") return price > 70 && price <= 200;
-    if (quickPrice === "200-400") return price > 200 && price <= 400;
-    if (quickPrice === "400+") return price > 400;
-
-    const min = minPrice ? Number(minPrice) : null;
-    const max = maxPrice ? Number(maxPrice) : null;
-
-    if (min !== null && price < min) return false;
-    if (max !== null && price > max) return false;
-
-    return true;
+    resetForm();
+    await loadProducts();
   }
 
-  async function requestProduct(product: Product) {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+  function startEdit(product: Product) {
+    setEditingId(product.id);
+    setActiveCategory(product.category);
 
-    if (!user) {
-      router.push("/login");
-      return;
-    }
-
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("role")
-      .eq("id", user.id)
-      .single();
-
-    if (profile?.role === "admin") {
-      alert("Admins manage listings from the admin panel. Admins cannot submit purchase requests.");
-      router.push("/admin");
-      return;
-    }
-
-    const notes = [
-      `Product Request: ${product.title}`,
-      `Category: ${category}`,
-      `Price: SGD${Number(product.price ?? 0).toFixed(2)}`,
-      `Delivery: ${product.delivery_time || "Manual review"}`,
-      `Image URL: ${product.image_url || "N/A"}`,
-      `Video URL: ${product.video_url || "N/A"}`,
-      "",
-      "Description:",
-      product.description || "N/A",
-      "",
-      "Tags:",
-      product.tags?.join(", ") || "None",
-    ].join("\n");
-
-    const { error } = await supabase.from("order_requests").insert({
-      user_id: user.id,
-      service_type: categoryLabels[category],
-      current_rank: product.title,
-      target_rank: `SGD${Number(product.price ?? 0).toFixed(2)}`,
-      notes,
-      status: "pending",
+    setForm({
+      category: product.category,
+      market_type: inferMarketType(product.tags),
+      title: product.title,
+      description: product.description ?? "",
+      price: String(product.price ?? 0),
+      tags:
+        product.tags
+          ?.filter(
+            (tag) =>
+              tag.toLowerCase() !== "market" &&
+              tag.toLowerCase() !== "in-game items" &&
+              tag.toLowerCase() !== "finger sleeves" &&
+              tag.toLowerCase() !== "keychains"
+          )
+          .join(", ") ?? "",
+      image_url: product.image_url ?? "",
+      video_url: product.video_url ?? "",
+      rank_icon_url:
+        product.category === "accounts" || product.category === "market"
+          ? ""
+          : product.rank_icon_url ?? "",
+      delivery_time: product.delivery_time ?? "Manual review",
+      is_active: product.is_active ?? true,
     });
+  }
+
+  async function toggleProduct(product: Product) {
+    const { error } = await supabase
+      .from("products")
+      .update({
+        is_active: !(product.is_active ?? true),
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", product.id);
 
     if (error) {
       alert(error.message);
       return;
     }
 
-    alert("Request submitted. Admin will review this listing soon.");
-    router.push("/dashboard");
+    await loadProducts();
   }
 
-  const filteredProducts = products
-    .filter((product) => {
-      const text = [
-        product.title,
-        product.description,
-        product.tags?.join(" "),
-        product.price?.toString(),
-        product.delivery_time,
-      ]
-        .join(" ")
-        .toLowerCase();
+  async function deleteProduct(product: Product) {
+    const confirmed = confirm(
+      `Delete "${product.title}" permanently? This cannot be undone.`
+    );
 
-      return text.includes(search.toLowerCase()) && matchesPrice(product);
-    })
-    .sort((a, b) => {
-      if (sort === "lowest") {
-        return Number(a.price ?? 0) - Number(b.price ?? 0);
-      }
+    if (!confirmed) return;
 
-      if (sort === "highest") {
-        return Number(b.price ?? 0) - Number(a.price ?? 0);
-      }
+    const { error } = await supabase
+      .from("products")
+      .delete()
+      .eq("id", product.id);
 
-      return 0;
-    });
+    if (error) {
+      alert(error.message);
+      return;
+    }
+
+    await loadProducts();
+  }
+
+  const filteredProducts = products.filter((product) => {
+    const text = [
+      product.title,
+      product.description,
+      product.tags?.join(" "),
+      product.category,
+      product.price?.toString(),
+    ]
+      .join(" ")
+      .toLowerCase();
+
+    return (
+      product.category === activeCategory &&
+      text.includes(search.toLowerCase())
+    );
+  });
 
   return (
-    <main className="min-h-screen bg-[#08080b] text-white">
-      <nav className="border-b border-zinc-900 bg-[#0b0b10]/90">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-5">
-          <Link href="/" className="text-2xl font-bold text-yellow-400">
-            Booster Lounge
-          </Link>
-
-          <div className="hidden items-center gap-6 text-sm text-zinc-300 md:flex">
-            <Link href="/services" className="hover:text-white">
-              Services
-            </Link>
-
-            <Link
-              href="/accounts"
-              className={
-                category === "accounts" ? "text-yellow-300" : "hover:text-white"
-              }
-            >
-              Accounts
-            </Link>
-
-            <Link
-              href="/pins"
-              className={
-                category === "pins" ? "text-yellow-300" : "hover:text-white"
-              }
-            >
-              Pins
-            </Link>
-
-            <Link
-              href="/offers"
-              className={
-                category === "offers" ? "text-yellow-300" : "hover:text-white"
-              }
-            >
-              Offers
-            </Link>
-
-            <Link href="/dashboard" className="hover:text-white">
-              Dashboard
-            </Link>
-
-            {isAdmin && (
-              <Link href="/admin" className="text-yellow-300 hover:text-white">
-                Admin
-              </Link>
-            )}
-          </div>
-
-          <Link
-            href={isAdmin ? "/admin" : "/dashboard"}
-            className="rounded-xl bg-yellow-400 px-4 py-2 text-sm font-bold text-black hover:bg-yellow-300"
-          >
-            {isAdmin ? "Admin Panel" : "My Dashboard"}
-          </Link>
+    <div className="mt-8 rounded-2xl border border-zinc-800 bg-zinc-900/80 p-6">
+      <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
+        <div>
+          <h2 className="text-xl font-bold">Product Manager</h2>
+          <p className="mt-1 text-sm text-zinc-400">
+            Add, edit, delete, hide, and upload images for accounts, pins,
+            offers, and market items.
+          </p>
         </div>
-      </nav>
 
-      <section className="relative overflow-hidden">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,_rgba(250,204,21,0.12),_transparent_35%),radial-gradient(circle_at_left,_rgba(59,130,246,0.10),_transparent_30%)]" />
+        <button
+          onClick={loadProducts}
+          className="rounded-xl bg-zinc-800 px-4 py-2 text-sm hover:bg-zinc-700"
+        >
+          Refresh
+        </button>
+      </div>
 
-        <div className="relative mx-auto grid max-w-7xl gap-8 px-6 py-12 lg:grid-cols-[280px_1fr]">
-          <aside className="h-fit rounded-3xl border border-zinc-800 bg-zinc-950/80 p-6">
-            <h2 className="text-2xl font-bold">Filters</h2>
-
-            <div className="mt-8 border-t border-zinc-800 pt-6">
-              <h3 className="font-bold">Price (SGD)</h3>
-
-              <div className="mt-4 grid grid-cols-2 gap-3">
-                <input
-                  className="rounded-xl bg-zinc-800 p-3 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
-                  placeholder="Min."
-                  value={minPrice}
-                  onChange={(e) => {
-                    setMinPrice(e.target.value);
-                    setQuickPrice("");
-                  }}
-                />
-
-                <input
-                  className="rounded-xl bg-zinc-800 p-3 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
-                  placeholder="Max."
-                  value={maxPrice}
-                  onChange={(e) => {
-                    setMaxPrice(e.target.value);
-                    setQuickPrice("");
-                  }}
-                />
-              </div>
-
-              <div className="mt-5 space-y-3 text-sm text-zinc-300">
-                <FilterButton
-                  text="SGD0 - SGD70"
-                  active={quickPrice === "0-70"}
-                  onClick={() => setQuickPrice("0-70")}
-                />
-
-                <FilterButton
-                  text="SGD70 - SGD200"
-                  active={quickPrice === "70-200"}
-                  onClick={() => setQuickPrice("70-200")}
-                />
-
-                <FilterButton
-                  text="SGD200 - SGD400"
-                  active={quickPrice === "200-400"}
-                  onClick={() => setQuickPrice("200-400")}
-                />
-
-                <FilterButton
-                  text="SGD400+"
-                  active={quickPrice === "400+"}
-                  onClick={() => setQuickPrice("400+")}
-                />
-              </div>
-            </div>
-
-            <div className="mt-8 border-t border-zinc-800 pt-6">
-              <h3 className="font-bold">Delivery Time</h3>
-
-              <div className="mt-5 space-y-3 text-sm text-zinc-300">
-                <FilterButton
-                  text="Manual review"
-                  active={search === "Manual review"}
-                  onClick={() => setSearch("Manual review")}
-                />
-
-                <FilterButton
-                  text="Instant after approval"
-                  active={search === "Instant after approval"}
-                  onClick={() => setSearch("Instant after approval")}
-                />
-
-                <FilterButton
-                  text="1 day"
-                  active={search === "1 day"}
-                  onClick={() => setSearch("1 day")}
-                />
-              </div>
-            </div>
-
-            <div className="mt-8 border-t border-zinc-800 pt-6">
-              <h3 className="font-bold">
-                {category === "accounts"
-                  ? "Rank / Account"
-                  : category === "pins"
-                  ? "Pin Type"
-                  : "Offer Type"}
-              </h3>
-
-              <input
-                className="mt-4 w-full rounded-xl bg-zinc-800 p-3 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
-                placeholder={
-                  category === "accounts"
-                    ? "Search rank/account"
-                    : category === "pins"
-                    ? "Search pin"
-                    : "Search offer"
-                }
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-
-              {(search || quickPrice || minPrice || maxPrice) && (
-                <button
-                  onClick={() => {
-                    setSearch("");
-                    setQuickPrice("");
-                    setMinPrice("");
-                    setMaxPrice("");
-                  }}
-                  className="mt-4 w-full rounded-xl border border-zinc-700 px-4 py-2 text-sm hover:bg-zinc-900"
-                >
-                  Clear filters
-                </button>
-              )}
-            </div>
-          </aside>
-
-          <section>
-            <div className="flex flex-col justify-between gap-5 md:flex-row md:items-start">
-              <div>
-                <h1 className="text-4xl font-bold">{title}</h1>
-                <p className="mt-3 max-w-2xl text-zinc-400">{subtitle}</p>
-
-                {isAdmin && (
-                  <div className="mt-4 rounded-2xl border border-yellow-400/40 bg-yellow-400/10 p-4 text-sm text-yellow-200">
-                    Admin mode: marketplace requests are disabled. Use the admin panel to add,
-                    edit, hide, or delete listings.
-                  </div>
-                )}
-              </div>
-
-              <select
-                className="rounded-xl bg-zinc-800 p-3 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
-                value={sort}
-                onChange={(e) => setSort(e.target.value)}
-              >
-                <option value="recommended">Recommended</option>
-                <option value="lowest">Lowest Price</option>
-                <option value="highest">Highest Price</option>
-              </select>
-            </div>
-
-            <div className="mt-8">
-              <input
-                className="w-full max-w-xl rounded-xl bg-zinc-800 p-4 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
-                placeholder={searchPlaceholder}
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-            </div>
-
-            <div className="mt-5 flex flex-wrap gap-2">
-              <span className="mr-1 text-sm font-semibold text-zinc-300">
-                Popular searches:
-              </span>
-
-              {popularSearches[category].map((item) => (
-                <button
-                  key={item}
-                  onClick={() => setSearch(item)}
-                  className="rounded-xl bg-zinc-800 px-4 py-2 text-sm hover:bg-zinc-700"
-                >
-                  {item}
-                </button>
-              ))}
-            </div>
-
-            <p className="mt-8 text-sm text-zinc-500">
-              {loading
-                ? "Loading listings..."
-                : `${filteredProducts.length} item(s) found`}
-            </p>
-
-            <div className="mt-6 grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-              {filteredProducts.map((product) => (
-                <ProductCard
-                  key={product.id}
-                  product={product}
-                  category={category}
-                  isAdmin={isAdmin}
-                  onRequest={() => requestProduct(product)}
-                />
-              ))}
-
-              {!loading && filteredProducts.length === 0 && (
-                <div className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-6 text-zinc-400">
-                  No listings found.
-                </div>
-              )}
-            </div>
-          </section>
-        </div>
-      </section>
-    </main>
-  );
-}
-
-function ProductCard({
-  product,
-  category,
-  isAdmin,
-  onRequest,
-}: {
-  product: Product;
-  category: ProductCategory;
-  isAdmin: boolean;
-  onRequest: () => void;
-}) {
-  return (
-    <div className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900/90">
-      <div className="relative h-44 bg-zinc-950">
-        {product.video_url ? (
-          <video
-            src={product.video_url}
-            className="h-full w-full object-cover"
-            controls
-            muted
-          />
-        ) : product.image_url ? (
-          <img
-            src={product.image_url}
-            alt={product.title}
-            className="h-full w-full object-cover"
-          />
-        ) : (
-          <div className="flex h-full w-full items-center justify-center text-5xl">
-            {categoryIcons[category]}
-          </div>
-        )}
-
-        {category !== "accounts" && product.rank_icon_url && (
-          <img
-            src={product.rank_icon_url}
-            alt="Icon"
-            className="absolute bottom-3 left-3 h-12 w-12 rounded-xl border border-zinc-700 bg-zinc-950 object-cover p-1"
-          />
+      <div className="mt-5 flex flex-wrap gap-2">
+        {(["market", "accounts", "pins", "offers"] as ProductCategory[]).map(
+          (category) => (
+            <button
+              key={category}
+              onClick={() => {
+                setActiveCategory(category);
+                setForm((prev) => ({
+                  ...prev,
+                  category,
+                  rank_icon_url:
+                    category === "accounts" || category === "market"
+                      ? ""
+                      : prev.rank_icon_url,
+                }));
+              }}
+              className={`rounded-xl px-4 py-2 text-sm font-semibold ${
+                activeCategory === category
+                  ? "bg-yellow-400 text-black"
+                  : "bg-zinc-800 text-white hover:bg-zinc-700"
+              }`}
+            >
+              {categoryLabels[category]}
+            </button>
+          )
         )}
       </div>
 
-      <div className="p-5">
-        <div className="flex justify-between gap-4">
+      <form
+        onSubmit={saveProduct}
+        className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-950/80 p-5"
+      >
+        <div className="flex flex-col justify-between gap-3 md:flex-row md:items-center">
           <div>
-            <h3 className="font-bold leading-6">{product.title}</h3>
-
-            <p className="mt-3 line-clamp-2 text-sm text-zinc-400">
-              {product.description || "No description provided."}
+            <h3 className="font-bold">
+              {editingId ? "Edit Listing" : "Add New Listing"}
+            </h3>
+            <p className="mt-1 text-sm text-zinc-500">
+              Upload product images from your computer or paste image/video
+              URLs.
             </p>
           </div>
 
-          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-zinc-800 text-2xl">
-            {categoryIcons[category]}
-          </div>
-        </div>
-
-        <div className="mt-4 flex flex-wrap gap-2">
-          {(product.tags ?? []).slice(0, 5).map((tag) => (
-            <span
-              key={tag}
-              className="rounded-lg bg-zinc-800 px-2 py-1 text-xs text-zinc-300"
-            >
-              {tag}
-            </span>
-          ))}
-        </div>
-
-        <div className="mt-6 flex items-end justify-between gap-4">
-          <div>
-            <p className="text-xs text-zinc-500">
-              {product.delivery_time || "Manual review"}
-            </p>
-            <p className="mt-1 text-2xl font-bold text-yellow-300">
-              SGD{Number(product.price ?? 0).toFixed(2)}
-            </p>
-          </div>
-
-          {isAdmin ? (
-            <Link
-              href="/admin"
-              className="rounded-xl bg-zinc-800 px-4 py-2 text-sm font-bold text-white hover:bg-zinc-700"
-            >
-              Manage
-            </Link>
-          ) : (
+          {editingId && (
             <button
-              onClick={onRequest}
-              className="rounded-xl bg-yellow-400 px-4 py-2 text-sm font-bold text-black hover:bg-yellow-300"
+              type="button"
+              onClick={resetForm}
+              className="rounded-xl border border-zinc-700 px-4 py-2 text-sm hover:bg-zinc-900"
             >
-              Request
+              Cancel Edit
             </button>
           )}
         </div>
+
+        <div className="mt-5 grid gap-4 md:grid-cols-2">
+          <label className="grid gap-2">
+            <span className="text-sm font-semibold text-zinc-300">
+              Category
+            </span>
+            <select
+              className="rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
+              value={form.category}
+              onChange={(e) =>
+                updateForm("category", e.target.value as ProductCategory)
+              }
+            >
+              <option value="market">Market</option>
+              <option value="accounts">Accounts</option>
+              <option value="pins">Pins</option>
+              <option value="offers">Offers</option>
+            </select>
+          </label>
+
+          {form.category === "market" && (
+            <label className="grid gap-2">
+              <span className="text-sm font-semibold text-zinc-300">
+                Market Type
+              </span>
+              <select
+                className="rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
+                value={form.market_type}
+                onChange={(e) =>
+                  updateForm("market_type", e.target.value as MarketType)
+                }
+              >
+                {marketTypes.map((type) => (
+                  <option key={type}>{type}</option>
+                ))}
+              </select>
+            </label>
+          )}
+
+          <label className="grid gap-2">
+            <span className="text-sm font-semibold text-zinc-300">Title</span>
+            <input
+              className="rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
+              placeholder="e.g. Black Finger Sleeves"
+              value={form.title}
+              onChange={(e) => updateForm("title", e.target.value)}
+            />
+          </label>
+
+          <label className="grid gap-2">
+            <span className="text-sm font-semibold text-zinc-300">
+              Price SGD
+            </span>
+            <input
+              className="rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
+              type="number"
+              min="0"
+              step="0.01"
+              placeholder="e.g. 4.99"
+              value={form.price}
+              onChange={(e) => updateForm("price", e.target.value)}
+            />
+          </label>
+
+          <label className="grid gap-2">
+            <span className="text-sm font-semibold text-zinc-300">
+              Delivery Time
+            </span>
+            <input
+              className="rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
+              placeholder="Manual review / Ready stock / Preorder"
+              value={form.delivery_time}
+              onChange={(e) => updateForm("delivery_time", e.target.value)}
+            />
+          </label>
+
+          <label className="grid gap-2 md:col-span-2">
+            <span className="text-sm font-semibold text-zinc-300">
+              Description
+            </span>
+            <textarea
+              className="min-h-24 rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
+              placeholder="Describe the product, stock, condition, delivery, or collection method."
+              value={form.description}
+              onChange={(e) => updateForm("description", e.target.value)}
+            />
+          </label>
+
+          <label className="grid gap-2 md:col-span-2">
+            <span className="text-sm font-semibold text-zinc-300">
+              Extra Tags, comma-separated
+            </span>
+            <input
+              className="rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
+              placeholder="Ready Stock, Black, Mobile Gaming"
+              value={form.tags}
+              onChange={(e) => updateForm("tags", e.target.value)}
+            />
+          </label>
+
+          <div className="grid gap-3 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
+            <span className="text-sm font-semibold text-zinc-300">
+              Listing Image
+            </span>
+
+            {form.image_url ? (
+              <img
+                src={form.image_url}
+                alt="Listing preview"
+                className="h-40 w-full rounded-xl object-cover"
+              />
+            ) : (
+              <div className="flex h-40 w-full items-center justify-center rounded-xl bg-zinc-800 text-4xl">
+                {categoryIcons[form.category]}
+              </div>
+            )}
+
+            <input
+              type="file"
+              accept="image/*"
+              className="rounded-xl bg-zinc-800 p-3 text-sm"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) uploadProductFile(file, "image_url");
+              }}
+            />
+
+            <input
+              className="rounded-xl bg-zinc-800 p-3 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
+              placeholder="Or paste image URL"
+              value={form.image_url}
+              onChange={(e) => updateForm("image_url", e.target.value)}
+            />
+
+            {uploadingImage && (
+              <p className="text-sm text-yellow-300">Uploading image...</p>
+            )}
+          </div>
+
+          {form.category !== "accounts" && form.category !== "market" && (
+            <div className="grid gap-3 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
+              <span className="text-sm font-semibold text-zinc-300">
+                Rank/Icon Image
+              </span>
+
+              {form.rank_icon_url ? (
+                <img
+                  src={form.rank_icon_url}
+                  alt="Icon preview"
+                  className="h-20 w-20 rounded-xl border border-zinc-700 bg-zinc-950 object-cover p-1"
+                />
+              ) : (
+                <div className="flex h-20 w-20 items-center justify-center rounded-xl bg-zinc-800 text-3xl">
+                  🏆
+                </div>
+              )}
+
+              <input
+                type="file"
+                accept="image/*"
+                className="rounded-xl bg-zinc-800 p-3 text-sm"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) uploadProductFile(file, "rank_icon_url");
+                }}
+              />
+
+              <input
+                className="rounded-xl bg-zinc-800 p-3 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
+                placeholder="Or paste icon URL"
+                value={form.rank_icon_url}
+                onChange={(e) => updateForm("rank_icon_url", e.target.value)}
+              />
+
+              {uploadingRankIcon && (
+                <p className="text-sm text-yellow-300">Uploading icon...</p>
+              )}
+            </div>
+          )}
+
+          <label className="grid gap-2 md:col-span-2">
+            <span className="text-sm font-semibold text-zinc-300">
+              Video URL
+            </span>
+            <input
+              className="rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
+              placeholder="https://...mp4"
+              value={form.video_url}
+              onChange={(e) => updateForm("video_url", e.target.value)}
+            />
+          </label>
+
+          <label className="flex items-center gap-3 rounded-xl bg-zinc-800 p-3">
+            <input
+              type="checkbox"
+              checked={form.is_active}
+              onChange={(e) => updateForm("is_active", e.target.checked)}
+            />
+            <span className="text-sm font-semibold text-zinc-300">
+              Active listing
+            </span>
+          </label>
+        </div>
+
+        <div className="mt-5 flex flex-wrap gap-3">
+          <button className="rounded-xl bg-yellow-400 px-5 py-3 font-bold text-black hover:bg-yellow-300">
+            {editingId ? "Save Changes" : "Add Listing"}
+          </button>
+
+          <button
+            type="button"
+            onClick={resetForm}
+            className="rounded-xl border border-zinc-700 px-5 py-3 font-bold text-white hover:bg-zinc-900"
+          >
+            Reset
+          </button>
+        </div>
+      </form>
+
+      <div className="mt-6">
+        <input
+          className="w-full rounded-xl bg-zinc-800 p-3 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
+          placeholder={`Search ${categoryLabels[activeCategory].toLowerCase()}...`}
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+
+        <p className="mt-4 text-sm text-zinc-500">
+          {loading
+            ? "Loading products..."
+            : `${filteredProducts.length} ${categoryLabels[
+                activeCategory
+              ].toLowerCase()} listing(s)`}
+        </p>
+
+        <div className="mt-4 grid gap-4">
+          {filteredProducts.length === 0 && !loading && (
+            <div className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-6 text-zinc-400">
+              No listings found.
+            </div>
+          )}
+
+          {filteredProducts.map((product) => (
+            <div
+              key={product.id}
+              className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-5"
+            >
+              <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
+                <div className="flex gap-4">
+                  <div className="relative h-24 w-32 shrink-0 overflow-hidden rounded-xl bg-zinc-800">
+                    {product.video_url ? (
+                      <video
+                        src={product.video_url}
+                        className="h-full w-full object-cover"
+                        muted
+                      />
+                    ) : product.image_url ? (
+                      <img
+                        src={product.image_url}
+                        alt={product.title}
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center text-3xl">
+                        {categoryIcons[product.category]}
+                      </div>
+                    )}
+
+                    {product.category !== "accounts" &&
+                      product.category !== "market" &&
+                      product.rank_icon_url && (
+                        <img
+                          src={product.rank_icon_url}
+                          alt="Icon"
+                          className="absolute bottom-1 left-1 h-8 w-8 rounded-lg border border-zinc-700 bg-zinc-950 object-cover p-1"
+                        />
+                      )}
+                  </div>
+
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h4 className="font-bold">{product.title}</h4>
+
+                      <span
+                        className={`rounded-full px-2 py-1 text-xs font-semibold ${
+                          product.is_active
+                            ? "bg-green-400/10 text-green-300"
+                            : "bg-red-400/10 text-red-300"
+                        }`}
+                      >
+                        {product.is_active ? "active" : "hidden"}
+                      </span>
+                    </div>
+
+                    <p className="mt-2 text-sm text-zinc-400">
+                      {product.description || "No description"}
+                    </p>
+
+                    <p className="mt-2 text-sm font-bold text-yellow-300">
+                      SGD{Number(product.price ?? 0).toFixed(2)}
+                    </p>
+
+                    <p className="mt-1 text-xs text-zinc-500">
+                      {product.delivery_time || "Manual review"}
+                    </p>
+
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {(product.tags ?? []).map((tag) => (
+                        <span
+                          key={tag}
+                          className="rounded-lg bg-zinc-800 px-2 py-1 text-xs text-zinc-300"
+                        >
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={() => startEdit(product)}
+                    className="rounded-xl bg-zinc-800 px-4 py-2 text-sm font-semibold hover:bg-zinc-700"
+                  >
+                    Edit
+                  </button>
+
+                  <button
+                    onClick={() => toggleProduct(product)}
+                    className="rounded-xl bg-blue-500 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-400"
+                  >
+                    {product.is_active ? "Hide" : "Show"}
+                  </button>
+
+                  <button
+                    onClick={() => deleteProduct(product)}
+                    className="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-500"
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
-  );
-}
-
-function FilterButton({
-  text,
-  active,
-  onClick,
-}: {
-  text: string;
-  active: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="flex items-center gap-3 text-left"
-    >
-      <span
-        className={`h-4 w-4 rounded-full border-2 ${
-          active ? "border-yellow-400 bg-yellow-400" : "border-white"
-        }`}
-      />
-      <span className={active ? "text-yellow-300" : "text-zinc-300"}>
-        {text}
-      </span>
-    </button>
   );
 }

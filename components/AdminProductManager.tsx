@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabaseClient";
 
-type ProductCategory = "accounts" | "pins" | "offers";
+type ProductCategory = "accounts" | "pins" | "offers" | "market";
+type MarketType = "In-game Items" | "Finger Sleeves" | "Keychains";
 
 type Product = {
   id: string;
@@ -22,6 +23,7 @@ type Product = {
 
 type ProductForm = {
   category: ProductCategory;
+  market_type: MarketType;
   title: string;
   description: string;
   price: string;
@@ -34,7 +36,8 @@ type ProductForm = {
 };
 
 const emptyForm: ProductForm = {
-  category: "accounts",
+  category: "market",
+  market_type: "Finger Sleeves",
   title: "",
   description: "",
   price: "",
@@ -50,13 +53,35 @@ const categoryLabels: Record<ProductCategory, string> = {
   accounts: "Accounts",
   pins: "Pins",
   offers: "Offers",
+  market: "Market",
 };
 
 const categoryIcons: Record<ProductCategory, string> = {
   accounts: "🎮",
   pins: "📌",
   offers: "🔥",
+  market: "🛒",
 };
+
+const marketTypes: MarketType[] = [
+  "In-game Items",
+  "Finger Sleeves",
+  "Keychains",
+];
+
+function inferMarketType(tags: string[] | null): MarketType {
+  const values = tags ?? [];
+
+  if (values.some((tag) => tag.toLowerCase() === "in-game items")) {
+    return "In-game Items";
+  }
+
+  if (values.some((tag) => tag.toLowerCase() === "keychains")) {
+    return "Keychains";
+  }
+
+  return "Finger Sleeves";
+}
 
 export default function AdminProductManager() {
   const supabase = useMemo(() => createClient(), []);
@@ -65,7 +90,7 @@ export default function AdminProductManager() {
   const [form, setForm] = useState<ProductForm>(emptyForm);
   const [editingId, setEditingId] = useState("");
   const [activeCategory, setActiveCategory] =
-    useState<ProductCategory>("accounts");
+    useState<ProductCategory>("market");
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
 
@@ -104,11 +129,21 @@ export default function AdminProductManager() {
     }));
   }
 
-  function parseTags(tags: string) {
-    return tags
+  function parseTags(tags: string, category: ProductCategory) {
+    const baseTags = tags
       .split(",")
       .map((tag) => tag.trim())
       .filter(Boolean);
+
+    if (category === "market") {
+      const withoutDuplicateMarketType = baseTags.filter(
+        (tag) => tag.toLowerCase() !== form.market_type.toLowerCase()
+      );
+
+      return ["Market", form.market_type, ...withoutDuplicateMarketType];
+    }
+
+    return baseTags;
   }
 
   function resetForm() {
@@ -200,11 +235,11 @@ export default function AdminProductManager() {
       title: form.title.trim(),
       description: form.description.trim() || null,
       price: Number(form.price || 0),
-      tags: parseTags(form.tags),
+      tags: parseTags(form.tags, form.category),
       image_url: form.image_url.trim() || null,
       video_url: form.video_url.trim() || null,
       rank_icon_url:
-        form.category === "accounts"
+        form.category === "accounts" || form.category === "market"
           ? null
           : form.rank_icon_url.trim() || null,
       delivery_time: form.delivery_time.trim() || "Manual review",
@@ -241,14 +276,26 @@ export default function AdminProductManager() {
 
     setForm({
       category: product.category,
+      market_type: inferMarketType(product.tags),
       title: product.title,
       description: product.description ?? "",
       price: String(product.price ?? 0),
-      tags: product.tags?.join(", ") ?? "",
+      tags:
+        product.tags
+          ?.filter(
+            (tag) =>
+              tag.toLowerCase() !== "market" &&
+              tag.toLowerCase() !== "in-game items" &&
+              tag.toLowerCase() !== "finger sleeves" &&
+              tag.toLowerCase() !== "keychains"
+          )
+          .join(", ") ?? "",
       image_url: product.image_url ?? "",
       video_url: product.video_url ?? "",
       rank_icon_url:
-        product.category === "accounts" ? "" : product.rank_icon_url ?? "",
+        product.category === "accounts" || product.category === "market"
+          ? ""
+          : product.rank_icon_url ?? "",
       delivery_time: product.delivery_time ?? "Manual review",
       is_active: product.is_active ?? true,
     });
@@ -314,8 +361,8 @@ export default function AdminProductManager() {
         <div>
           <h2 className="text-xl font-bold">Product Manager</h2>
           <p className="mt-1 text-sm text-zinc-400">
-            Add, edit, delete, hide, and upload images for accounts, pins, and
-            offers.
+            Add, edit, delete, hide, and upload images for accounts, pins,
+            offers, and market items.
           </p>
         </div>
 
@@ -328,7 +375,7 @@ export default function AdminProductManager() {
       </div>
 
       <div className="mt-5 flex flex-wrap gap-2">
-        {(["accounts", "pins", "offers"] as ProductCategory[]).map(
+        {(["market", "accounts", "pins", "offers"] as ProductCategory[]).map(
           (category) => (
             <button
               key={category}
@@ -337,7 +384,10 @@ export default function AdminProductManager() {
                 setForm((prev) => ({
                   ...prev,
                   category,
-                  rank_icon_url: category === "accounts" ? "" : prev.rank_icon_url,
+                  rank_icon_url:
+                    category === "accounts" || category === "market"
+                      ? ""
+                      : prev.rank_icon_url,
                 }));
               }}
               className={`rounded-xl px-4 py-2 text-sm font-semibold ${
@@ -362,7 +412,8 @@ export default function AdminProductManager() {
               {editingId ? "Edit Listing" : "Add New Listing"}
             </h3>
             <p className="mt-1 text-sm text-zinc-500">
-              Upload images from your computer or paste image/video URLs.
+              Upload product images from your computer or paste image/video
+              URLs.
             </p>
           </div>
 
@@ -389,17 +440,37 @@ export default function AdminProductManager() {
                 updateForm("category", e.target.value as ProductCategory)
               }
             >
+              <option value="market">Market</option>
               <option value="accounts">Accounts</option>
               <option value="pins">Pins</option>
               <option value="offers">Offers</option>
             </select>
           </label>
 
+          {form.category === "market" && (
+            <label className="grid gap-2">
+              <span className="text-sm font-semibold text-zinc-300">
+                Market Type
+              </span>
+              <select
+                className="rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
+                value={form.market_type}
+                onChange={(e) =>
+                  updateForm("market_type", e.target.value as MarketType)
+                }
+              >
+                {marketTypes.map((type) => (
+                  <option key={type}>{type}</option>
+                ))}
+              </select>
+            </label>
+          )}
+
           <label className="grid gap-2">
             <span className="text-sm font-semibold text-zinc-300">Title</span>
             <input
               className="rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
-              placeholder="e.g. Mythic I Account • 90K Trophies"
+              placeholder="e.g. Black Finger Sleeves"
               value={form.title}
               onChange={(e) => updateForm("title", e.target.value)}
             />
@@ -414,7 +485,7 @@ export default function AdminProductManager() {
               type="number"
               min="0"
               step="0.01"
-              placeholder="e.g. 29.99"
+              placeholder="e.g. 4.99"
               value={form.price}
               onChange={(e) => updateForm("price", e.target.value)}
             />
@@ -426,7 +497,7 @@ export default function AdminProductManager() {
             </span>
             <input
               className="rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
-              placeholder="Manual review"
+              placeholder="Manual review / Ready stock / Preorder"
               value={form.delivery_time}
               onChange={(e) => updateForm("delivery_time", e.target.value)}
             />
@@ -438,7 +509,7 @@ export default function AdminProductManager() {
             </span>
             <textarea
               className="min-h-24 rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
-              placeholder="Describe the account, pins, or offer."
+              placeholder="Describe the product, stock, condition, delivery, or collection method."
               value={form.description}
               onChange={(e) => updateForm("description", e.target.value)}
             />
@@ -446,11 +517,11 @@ export default function AdminProductManager() {
 
           <label className="grid gap-2 md:col-span-2">
             <span className="text-sm font-semibold text-zinc-300">
-              Tags, comma-separated
+              Extra Tags, comma-separated
             </span>
             <input
               className="rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
-              placeholder="Mythic, 90K, Account, Fast"
+              placeholder="Ready Stock, Black, Mobile Gaming"
               value={form.tags}
               onChange={(e) => updateForm("tags", e.target.value)}
             />
@@ -495,7 +566,7 @@ export default function AdminProductManager() {
             )}
           </div>
 
-          {form.category !== "accounts" && (
+          {form.category !== "accounts" && form.category !== "market" && (
             <div className="grid gap-3 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
               <span className="text-sm font-semibold text-zinc-300">
                 Rank/Icon Image
@@ -625,6 +696,7 @@ export default function AdminProductManager() {
                     )}
 
                     {product.category !== "accounts" &&
+                      product.category !== "market" &&
                       product.rank_icon_url && (
                         <img
                           src={product.rank_icon_url}
