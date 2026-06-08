@@ -55,12 +55,15 @@ export default function DashboardPage() {
 
   const [orders, setOrders] = useState<Order[]>([]);
   const [requests, setRequests] = useState<OrderRequest[]>([]);
+  const [messages, setMessages] = useState<Message[]>([]);
 
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
+  const [usernameDraft, setUsernameDraft] = useState("");
   const [credits, setCredits] = useState(0);
+  const [profileMessage, setProfileMessage] = useState("");
+  const [resetMessage, setResetMessage] = useState("");
 
-  const [messages, setMessages] = useState<Message[]>([]);
   const [chatInputs, setChatInputs] = useState<Record<string, string>>({});
   const [currentUserId, setCurrentUserId] = useState("");
 
@@ -68,6 +71,11 @@ export default function DashboardPage() {
   const [activeTab, setActiveTab] = useState<DashboardTab>("overview");
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
   const [expandedRequestId, setExpandedRequestId] = useState<string | null>(
+    null
+  );
+
+  const [chatWidgetOpen, setChatWidgetOpen] = useState(false);
+  const [selectedChatOrderId, setSelectedChatOrderId] = useState<string | null>(
     null
   );
 
@@ -96,6 +104,7 @@ export default function DashboardPage() {
       if (!profileError && profile) {
         const userProfile = profile as Profile;
         setUsername(userProfile.username ?? "");
+        setUsernameDraft(userProfile.username ?? "");
         setCredits(Number(userProfile.credits ?? 0));
       }
 
@@ -110,10 +119,6 @@ export default function DashboardPage() {
         return;
       }
 
-      if (requestData) {
-        setRequests(requestData);
-      }
-
       const { data: orderData, error: orderError } = await supabase
         .from("orders")
         .select("*")
@@ -123,10 +128,6 @@ export default function DashboardPage() {
         console.error(orderError.message);
         setLoading(false);
         return;
-      }
-
-      if (orderData) {
-        setOrders(orderData);
       }
 
       const { data: messageData, error: messageError } = await supabase
@@ -140,10 +141,9 @@ export default function DashboardPage() {
         return;
       }
 
-      if (messageData) {
-        setMessages(messageData);
-      }
-
+      setRequests((requestData ?? []) as OrderRequest[]);
+      setOrders((orderData ?? []) as Order[]);
+      setMessages((messageData ?? []) as Message[]);
       setLoading(false);
     }
 
@@ -162,6 +162,46 @@ export default function DashboardPage() {
   async function logout() {
     await supabase.auth.signOut();
     router.push("/");
+  }
+
+  async function updateOwnUsername() {
+    const cleanUsername = usernameDraft.trim();
+
+    if (!cleanUsername) {
+      alert("Username cannot be empty.");
+      return;
+    }
+
+    const { error } = await supabase
+      .from("profiles")
+      .update({ username: cleanUsername })
+      .eq("id", currentUserId);
+
+    if (error) {
+      alert(error.message);
+      return;
+    }
+
+    setUsername(cleanUsername);
+    setProfileMessage("Username updated.");
+  }
+
+  async function sendPasswordResetEmail() {
+    if (!email) {
+      alert("No email found for this account.");
+      return;
+    }
+
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/login`,
+    });
+
+    if (error) {
+      alert(error.message);
+      return;
+    }
+
+    setResetMessage("Password reset email sent. Check your inbox.");
   }
 
   async function markOrderUpdateRead(orderId: string) {
@@ -200,10 +240,11 @@ export default function DashboardPage() {
     }
 
     setOrders((prev) =>
-      prev.map((order) => ({
-        ...order,
-        user_seen_update: false === order.user_seen_update ? true : order.user_seen_update,
-      }))
+      prev.map((order) =>
+        unreadIds.includes(order.id)
+          ? { ...order, user_seen_update: true }
+          : order
+      )
     );
   }
 
@@ -238,18 +279,14 @@ export default function DashboardPage() {
       return;
     }
 
-    if (messageData) {
-      setMessages(messageData);
-    }
+    setMessages((messageData ?? []) as Message[]);
   }
 
   const activeOrders = orders.filter((order) => order.status !== "completed");
   const completedOrders = orders.filter((order) => order.status === "completed");
-
   const unreadOrders = orders.filter(
     (order) => order.user_seen_update === false
   );
-
   const pendingRequests = requests.filter(
     (request) => request.status === "pending"
   );
@@ -491,16 +528,51 @@ export default function DashboardPage() {
             </div>
           </Panel>
 
-          <Panel
-            title="Account Status"
-            subtitle="Quick account summary."
-          >
-            <div className="mt-5 grid gap-3 text-sm">
-              <InfoRow label="Username" value={username || "Not set"} />
+          <Panel title="Profile" subtitle="Quick access to account details.">
+            <div className="mt-5 grid gap-4">
+              <div className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-4">
+                <label className="text-sm font-semibold text-zinc-300">
+                  Username
+                </label>
+
+                <div className="mt-2 flex flex-col gap-3 sm:flex-row">
+                  <input
+                    className="flex-1 rounded-xl bg-zinc-800 p-3 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
+                    value={usernameDraft}
+                    onChange={(e) => setUsernameDraft(e.target.value)}
+                    placeholder="Enter username"
+                  />
+
+                  <button
+                    onClick={updateOwnUsername}
+                    className="rounded-xl bg-yellow-400 px-4 py-2 text-sm font-bold text-black hover:bg-yellow-300"
+                  >
+                    Save
+                  </button>
+                </div>
+
+                {profileMessage && (
+                  <p className="mt-2 text-sm text-green-300">
+                    {profileMessage}
+                  </p>
+                )}
+              </div>
+
               <InfoRow label="Email" value={email || "N/A"} />
               <InfoRow label="Credits" value={`$${credits.toFixed(2)}`} />
               <InfoRow label="Pending Requests" value={pendingRequests.length} />
               <InfoRow label="Unread Updates" value={unreadOrders.length} />
+
+              <button
+                onClick={sendPasswordResetEmail}
+                className="rounded-xl border border-zinc-700 px-4 py-3 text-sm font-semibold text-zinc-200 hover:bg-zinc-900"
+              >
+                Send Password Reset Email
+              </button>
+
+              {resetMessage && (
+                <p className="text-sm text-green-300">{resetMessage}</p>
+              )}
             </div>
           </Panel>
         </section>
@@ -625,6 +697,19 @@ export default function DashboardPage() {
           </div>
         </section>
       )}
+
+      <FloatingSupportChat
+        open={chatWidgetOpen}
+        setOpen={setChatWidgetOpen}
+        activeOrders={activeOrders}
+        selectedOrderId={selectedChatOrderId}
+        setSelectedOrderId={setSelectedChatOrderId}
+        messages={messages}
+        currentUserId={currentUserId}
+        chatInputs={chatInputs}
+        setChatInputs={setChatInputs}
+        sendMessage={sendMessage}
+      />
     </PageShell>
   );
 }
@@ -674,7 +759,9 @@ function StatCard({
         {value}
       </h2>
 
-      {subValue && <p className="mt-1 truncate text-xs text-zinc-500">{subValue}</p>}
+      {subValue && (
+        <p className="mt-1 truncate text-xs text-zinc-500">{subValue}</p>
+      )}
     </div>
   );
 }
@@ -1038,7 +1125,7 @@ function OrderCard({
 
       {order.status === "accepted" && (
         <InfoBox tone="green">
-          Your order has been accepted. The admin will update the progress soon.
+          Your order has been accepted. The admin will update progress soon.
         </InfoBox>
       )}
 
@@ -1115,6 +1202,137 @@ function OrderCard({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function FloatingSupportChat({
+  open,
+  setOpen,
+  activeOrders,
+  selectedOrderId,
+  setSelectedOrderId,
+  messages,
+  currentUserId,
+  chatInputs,
+  setChatInputs,
+  sendMessage,
+}: {
+  open: boolean;
+  setOpen: (value: boolean) => void;
+  activeOrders: Order[];
+  selectedOrderId: string | null;
+  setSelectedOrderId: (value: string | null) => void;
+  messages: Message[];
+  currentUserId: string;
+  chatInputs: Record<string, string>;
+  setChatInputs: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  sendMessage: (orderId: string) => Promise<void>;
+}) {
+  const selectedOrder =
+    activeOrders.find((order) => order.id === selectedOrderId) ||
+    activeOrders[0];
+
+  const orderMessages = selectedOrder
+    ? messages.filter((message) => message.order_id === selectedOrder.id)
+    : [];
+
+  return (
+    <div className="fixed bottom-6 right-6 z-50">
+      {open && (
+        <div className="mb-4 w-[350px] overflow-hidden rounded-3xl border border-zinc-800 bg-zinc-950 shadow-2xl">
+          <div className="flex items-center justify-between border-b border-zinc-800 bg-zinc-900 px-5 py-4">
+            <div>
+              <p className="font-bold">24/7 Support</p>
+              <p className="text-xs text-zinc-400">Chat with admin</p>
+            </div>
+
+            <button
+              onClick={() => setOpen(false)}
+              className="rounded-lg bg-zinc-800 px-3 py-1 text-sm hover:bg-zinc-700"
+            >
+              ×
+            </button>
+          </div>
+
+          <div className="p-4">
+            {activeOrders.length === 0 && (
+              <p className="text-sm text-zinc-400">
+                No active orders available for chat yet.
+              </p>
+            )}
+
+            {activeOrders.length > 0 && selectedOrder && (
+              <>
+                <select
+                  className="w-full rounded-xl bg-zinc-800 p-3 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
+                  value={selectedOrder.id}
+                  onChange={(e) => setSelectedOrderId(e.target.value)}
+                >
+                  {activeOrders.map((order) => (
+                    <option key={order.id} value={order.id}>
+                      {order.service_type} — {order.status}
+                    </option>
+                  ))}
+                </select>
+
+                <div className="mt-4 max-h-72 space-y-3 overflow-y-auto rounded-2xl bg-zinc-900 p-3">
+                  {orderMessages.length === 0 && (
+                    <p className="text-sm text-zinc-500">No messages yet.</p>
+                  )}
+
+                  {orderMessages.map((message) => (
+                    <div
+                      key={message.id}
+                      className={`max-w-[85%] rounded-2xl p-3 text-sm ${
+                        message.sender_id === currentUserId
+                          ? "ml-auto bg-yellow-400 text-black"
+                          : "mr-auto bg-zinc-800 text-white"
+                      }`}
+                    >
+                      {message.message}
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mt-4 flex gap-2">
+                  <input
+                    className="flex-1 rounded-xl bg-zinc-800 p-3 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
+                    placeholder="Type message..."
+                    value={chatInputs[selectedOrder.id] ?? ""}
+                    onChange={(e) =>
+                      setChatInputs((prev) => ({
+                        ...prev,
+                        [selectedOrder.id]: e.target.value,
+                      }))
+                    }
+                  />
+
+                  <button
+                    onClick={() => sendMessage(selectedOrder.id)}
+                    className="rounded-xl bg-yellow-400 px-4 py-2 text-sm font-bold text-black hover:bg-yellow-300"
+                  >
+                    Send
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      <button
+        onClick={() => {
+          if (!selectedOrderId && activeOrders.length > 0) {
+            setSelectedOrderId(activeOrders[0].id);
+          }
+
+          setOpen(!open);
+        }}
+        className="flex h-16 w-16 items-center justify-center rounded-full bg-yellow-400 text-2xl text-black shadow-2xl shadow-yellow-400/30 hover:bg-yellow-300"
+      >
+        🎧
+      </button>
     </div>
   );
 }

@@ -203,7 +203,10 @@ export default function AdminProductManager() {
       tags: parseTags(form.tags),
       image_url: form.image_url.trim() || null,
       video_url: form.video_url.trim() || null,
-      rank_icon_url: form.rank_icon_url.trim() || null,
+      rank_icon_url:
+        form.category === "accounts"
+          ? null
+          : form.rank_icon_url.trim() || null,
       delivery_time: form.delivery_time.trim() || "Manual review",
       is_active: form.is_active,
       updated_at: new Date().toISOString(),
@@ -244,7 +247,8 @@ export default function AdminProductManager() {
       tags: product.tags?.join(", ") ?? "",
       image_url: product.image_url ?? "",
       video_url: product.video_url ?? "",
-      rank_icon_url: product.rank_icon_url ?? "",
+      rank_icon_url:
+        product.category === "accounts" ? "" : product.rank_icon_url ?? "",
       delivery_time: product.delivery_time ?? "Manual review",
       is_active: product.is_active ?? true,
     });
@@ -333,6 +337,7 @@ export default function AdminProductManager() {
                 setForm((prev) => ({
                   ...prev,
                   category,
+                  rank_icon_url: category === "accounts" ? "" : prev.rank_icon_url,
                 }));
               }}
               className={`rounded-xl px-4 py-2 text-sm font-semibold ${
@@ -490,44 +495,46 @@ export default function AdminProductManager() {
             )}
           </div>
 
-          <div className="grid gap-3 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
-            <span className="text-sm font-semibold text-zinc-300">
-              Rank Icon Image
-            </span>
+          {form.category !== "accounts" && (
+            <div className="grid gap-3 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
+              <span className="text-sm font-semibold text-zinc-300">
+                Rank/Icon Image
+              </span>
 
-            {form.rank_icon_url ? (
-              <img
-                src={form.rank_icon_url}
-                alt="Rank icon preview"
-                className="h-20 w-20 rounded-xl border border-zinc-700 bg-zinc-950 object-cover p-1"
+              {form.rank_icon_url ? (
+                <img
+                  src={form.rank_icon_url}
+                  alt="Icon preview"
+                  className="h-20 w-20 rounded-xl border border-zinc-700 bg-zinc-950 object-cover p-1"
+                />
+              ) : (
+                <div className="flex h-20 w-20 items-center justify-center rounded-xl bg-zinc-800 text-3xl">
+                  🏆
+                </div>
+              )}
+
+              <input
+                type="file"
+                accept="image/*"
+                className="rounded-xl bg-zinc-800 p-3 text-sm"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) uploadProductFile(file, "rank_icon_url");
+                }}
               />
-            ) : (
-              <div className="flex h-20 w-20 items-center justify-center rounded-xl bg-zinc-800 text-3xl">
-                🏆
-              </div>
-            )}
 
-            <input
-              type="file"
-              accept="image/*"
-              className="rounded-xl bg-zinc-800 p-3 text-sm"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) uploadProductFile(file, "rank_icon_url");
-              }}
-            />
+              <input
+                className="rounded-xl bg-zinc-800 p-3 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
+                placeholder="Or paste icon URL"
+                value={form.rank_icon_url}
+                onChange={(e) => updateForm("rank_icon_url", e.target.value)}
+              />
 
-            <input
-              className="rounded-xl bg-zinc-800 p-3 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
-              placeholder="Or paste rank icon URL"
-              value={form.rank_icon_url}
-              onChange={(e) => updateForm("rank_icon_url", e.target.value)}
-            />
-
-            {uploadingRankIcon && (
-              <p className="text-sm text-yellow-300">Uploading rank icon...</p>
-            )}
-          </div>
+              {uploadingRankIcon && (
+                <p className="text-sm text-yellow-300">Uploading icon...</p>
+              )}
+            </div>
+          )}
 
           <label className="grid gap-2 md:col-span-2">
             <span className="text-sm font-semibold text-zinc-300">
@@ -617,13 +624,14 @@ export default function AdminProductManager() {
                       </div>
                     )}
 
-                    {product.rank_icon_url && (
-                      <img
-                        src={product.rank_icon_url}
-                        alt="Rank icon"
-                        className="absolute bottom-1 left-1 h-8 w-8 rounded-lg border border-zinc-700 bg-zinc-950 object-cover p-1"
-                      />
-                    )}
+                    {product.category !== "accounts" &&
+                      product.rank_icon_url && (
+                        <img
+                          src={product.rank_icon_url}
+                          alt="Icon"
+                          className="absolute bottom-1 left-1 h-8 w-8 rounded-lg border border-zinc-700 bg-zinc-950 object-cover p-1"
+                        />
+                      )}
                   </div>
 
                   <div>

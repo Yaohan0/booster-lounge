@@ -138,10 +138,9 @@ export default function AdminPage() {
 
     if (!profile) return userId;
 
-    const username = profile.username || "No username";
-    const email = profile.email || "No email";
-
-    return `${username} • ${email}`;
+    return `${profile.username || "No username"} • ${
+      profile.email || "No email"
+    }`;
   }
 
   async function refreshAdminData() {
@@ -185,20 +184,16 @@ export default function AdminPage() {
       return;
     }
 
-    if (profileData) {
-      setProfiles(profileData);
-      const nextInputs: Record<string, string> = {};
+    setProfiles((profileData ?? []) as Profile[]);
+    setOrders((orderData ?? []) as Order[]);
+    setRequests((requestData ?? []) as OrderRequest[]);
+    setMessages((messageData ?? []) as Message[]);
 
-      profileData.forEach((profile) => {
-        nextInputs[profile.id] = profile.username || "";
-      });
-
-      setUsernameInputs(nextInputs);
-    }
-
-    if (orderData) setOrders(orderData);
-    if (requestData) setRequests(requestData);
-    if (messageData) setMessages(messageData);
+    const nextInputs: Record<string, string> = {};
+    (profileData ?? []).forEach((profile) => {
+      nextInputs[profile.id] = profile.username || "";
+    });
+    setUsernameInputs(nextInputs);
   }
 
   async function assignOrder(e: React.FormEvent) {
@@ -218,6 +213,7 @@ export default function AdminPage() {
       status: "pending",
       user_seen_update: false,
       admin_archived: false,
+      updated_at: new Date().toISOString(),
     });
 
     if (error) {
@@ -414,27 +410,51 @@ export default function AdminPage() {
     );
   }
 
-  async function updateRequestStatus(requestId: string, status: string) {
+  async function deleteRequest(requestId: string) {
     const { error } = await supabase
       .from("order_requests")
-      .update({
-        status,
-        updated_at: new Date().toISOString(),
-      })
+      .delete()
       .eq("id", requestId);
 
     if (error) {
       alert(error.message);
+      return false;
+    }
+
+    setRequests((prev) => prev.filter((request) => request.id !== requestId));
+    return true;
+  }
+
+  async function rejectRequest(request: OrderRequest) {
+    const confirmed = confirm(
+      "Reject this request and remove it from Incoming Requests?"
+    );
+
+    if (!confirmed) return;
+
+    await deleteRequest(request.id);
+  }
+
+  async function acceptRequestAndCreateOrder(request: OrderRequest) {
+    const { error: orderError } = await supabase.from("orders").insert({
+      user_id: request.user_id,
+      service_type: request.service_type,
+      current_rank: request.current_rank,
+      target_rank: request.target_rank,
+      notes: request.notes,
+      status: "accepted",
+      user_seen_update: false,
+      admin_archived: false,
+      updated_at: new Date().toISOString(),
+    });
+
+    if (orderError) {
+      alert(orderError.message);
       return;
     }
 
-    setRequests((prev) =>
-      prev.map((request) =>
-        request.id === requestId
-          ? { ...request, status, updated_at: new Date().toISOString() }
-          : request
-      )
-    );
+    await deleteRequest(request.id);
+    await refreshAdminData();
   }
 
   async function convertRequestToOrder(request: OrderRequest) {
@@ -447,6 +467,7 @@ export default function AdminPage() {
       status: "pending",
       user_seen_update: false,
       admin_archived: false,
+      updated_at: new Date().toISOString(),
     });
 
     if (orderError) {
@@ -454,19 +475,7 @@ export default function AdminPage() {
       return;
     }
 
-    const { error: requestError } = await supabase
-      .from("order_requests")
-      .update({
-        status: "converted_to_order",
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", request.id);
-
-    if (requestError) {
-      alert(requestError.message);
-      return;
-    }
-
+    await deleteRequest(request.id);
     await refreshAdminData();
   }
 
@@ -501,7 +510,7 @@ export default function AdminPage() {
       return;
     }
 
-    if (messageData) setMessages(messageData);
+    setMessages((messageData ?? []) as Message[]);
   }
 
   async function logout() {
@@ -519,22 +528,23 @@ export default function AdminPage() {
     );
   });
 
-  const filteredRequests = requests.filter((request) => {
-    const search = requestSearch.toLowerCase();
-    const user = profiles.find((profile) => profile.id === request.user_id);
-    const userLabel = getUserLabel(request.user_id).toLowerCase();
+  const filteredRequests = requests
+    .filter((request) => request.status === "pending")
+    .filter((request) => {
+      const search = requestSearch.toLowerCase();
+      const user = profiles.find((profile) => profile.id === request.user_id);
+      const userLabel = getUserLabel(request.user_id).toLowerCase();
 
-    return (
-      userLabel.includes(search) ||
-      user?.email?.toLowerCase().includes(search) ||
-      user?.username?.toLowerCase().includes(search) ||
-      request.service_type.toLowerCase().includes(search) ||
-      request.current_rank?.toLowerCase().includes(search) ||
-      request.target_rank?.toLowerCase().includes(search) ||
-      request.notes?.toLowerCase().includes(search) ||
-      request.status.toLowerCase().includes(search)
-    );
-  });
+      return (
+        userLabel.includes(search) ||
+        user?.email?.toLowerCase().includes(search) ||
+        user?.username?.toLowerCase().includes(search) ||
+        request.service_type.toLowerCase().includes(search) ||
+        request.current_rank?.toLowerCase().includes(search) ||
+        request.target_rank?.toLowerCase().includes(search) ||
+        request.notes?.toLowerCase().includes(search)
+      );
+    });
 
   const activeOrders = orders.filter((order) => order.admin_archived !== true);
 
@@ -594,7 +604,7 @@ export default function AdminPage() {
       <div className="grid gap-4 md:grid-cols-6">
         <StatCard label="Users" value={profiles.length} />
         <StatCard label="Active Orders" value={activeOrders.length} />
-        <StatCard label="Requests" value={requests.length} />
+        <StatCard label="Pending Requests" value={filteredRequests.length} />
         <StatCard label="Completed" value={completedOrders.length} />
         <StatCard label="Rejected" value={rejectedOrders.length} danger />
         <StatCard label="Archived" value={archivedOrders.length} highlight />
@@ -629,7 +639,6 @@ export default function AdminPage() {
               <option>Rank Boost</option>
               <option>Trophy Boost</option>
               <option>Prestige Icon</option>
-              <option>Brawlers Rank</option>
               <option>Coaching</option>
               <option>Account Purchase</option>
               <option>Exclusive Pins</option>
@@ -669,18 +678,18 @@ export default function AdminPage() {
 
       <Panel
         title="Incoming Requests"
-        subtitle="Review service, account, pin, and offer requests."
+        subtitle="Accept creates an order and removes the request from this list."
       >
         <input
           className="mt-5 w-full rounded-xl bg-zinc-800 p-3 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
-          placeholder="Search requests by username, email, service, rank, notes, or status..."
+          placeholder="Search requests by username, email, service, rank, or notes..."
           value={requestSearch}
           onChange={(e) => setRequestSearch(e.target.value)}
         />
 
         <div className="mt-5 grid gap-5">
           {filteredRequests.length === 0 && (
-            <EmptyState text="No incoming requests found." />
+            <EmptyState text="No pending incoming requests found." />
           )}
 
           {filteredRequests.map((request) => (
@@ -720,32 +729,25 @@ export default function AdminPage() {
               </div>
 
               <div className="mt-5 flex flex-wrap gap-2">
-                <RequestButton
-                  label="pending"
-                  active={request.status === "pending"}
-                  onClick={() => updateRequestStatus(request.id, "pending")}
-                />
+                <button
+                  onClick={() => acceptRequestAndCreateOrder(request)}
+                  className="rounded-xl bg-green-400 px-3 py-2 text-sm font-bold text-black hover:bg-green-300"
+                >
+                  Accept + Create Order
+                </button>
 
-                <RequestButton
-                  label="accept"
-                  active={request.status === "accepted"}
-                  onClick={() => updateRequestStatus(request.id, "accepted")}
-                  variant="green"
-                />
-
-                <RequestButton
-                  label="reject"
-                  active={request.status === "rejected"}
-                  onClick={() => updateRequestStatus(request.id, "rejected")}
-                  variant="red"
-                />
+                <button
+                  onClick={() => rejectRequest(request)}
+                  className="rounded-xl bg-red-500 px-3 py-2 text-sm font-bold text-white hover:bg-red-400"
+                >
+                  Reject + Remove
+                </button>
 
                 <button
                   onClick={() => convertRequestToOrder(request)}
-                  disabled={request.status === "converted_to_order"}
-                  className="rounded-xl bg-yellow-400 px-3 py-2 text-sm font-bold text-black hover:bg-yellow-300 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded-xl bg-yellow-400 px-3 py-2 text-sm font-bold text-black hover:bg-yellow-300"
                 >
-                  Convert to Order
+                  Convert to Pending Order
                 </button>
               </div>
             </div>
@@ -997,37 +999,6 @@ function StatusCard({ label, status }: { label: string; status: string }) {
         <StatusBadge status={status} />
       </div>
     </div>
-  );
-}
-
-function RequestButton({
-  label,
-  active,
-  onClick,
-  variant = "yellow",
-}: {
-  label: string;
-  active: boolean;
-  onClick: () => void;
-  variant?: "yellow" | "green" | "red";
-}) {
-  const activeClasses = {
-    yellow: "bg-yellow-400 text-black",
-    green: "bg-green-400 text-black",
-    red: "bg-red-400 text-black",
-  };
-
-  return (
-    <button
-      onClick={onClick}
-      className={`rounded-xl px-3 py-2 text-sm ${
-        active
-          ? `${activeClasses[variant]} font-bold`
-          : "bg-zinc-800 text-white hover:bg-zinc-700"
-      }`}
-    >
-      {label}
-    </button>
   );
 }
 
