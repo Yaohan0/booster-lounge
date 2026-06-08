@@ -52,6 +52,12 @@ const categoryLabels: Record<ProductCategory, string> = {
   offers: "Offers",
 };
 
+const categoryIcons: Record<ProductCategory, string> = {
+  accounts: "🎮",
+  pins: "📌",
+  offers: "🔥",
+};
+
 export default function AdminProductManager() {
   const supabase = useMemo(() => createClient(), []);
 
@@ -62,6 +68,9 @@ export default function AdminProductManager() {
     useState<ProductCategory>("accounts");
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
+
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [uploadingRankIcon, setUploadingRankIcon] = useState(false);
 
   useEffect(() => {
     loadProducts();
@@ -108,6 +117,74 @@ export default function AdminProductManager() {
       category: activeCategory,
     });
     setEditingId("");
+  }
+
+  function cleanFileName(fileName: string) {
+    return fileName
+      .toLowerCase()
+      .replace(/[^a-z0-9.]+/g, "-")
+      .replace(/-+/g, "-");
+  }
+
+  async function uploadProductFile(
+    file: File,
+    targetField: "image_url" | "rank_icon_url"
+  ) {
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      alert("Please upload an image file.");
+      return;
+    }
+
+    const maxSizeMb = 5;
+    const maxSizeBytes = maxSizeMb * 1024 * 1024;
+
+    if (file.size > maxSizeBytes) {
+      alert(`Image is too large. Keep it under ${maxSizeMb}MB.`);
+      return;
+    }
+
+    if (targetField === "image_url") {
+      setUploadingImage(true);
+    } else {
+      setUploadingRankIcon(true);
+    }
+
+    const safeName = cleanFileName(file.name);
+    const folder = targetField === "image_url" ? "listing-images" : "rank-icons";
+    const filePath = `${folder}/${form.category}/${Date.now()}-${safeName}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from("product-images")
+      .upload(filePath, file, {
+        cacheControl: "3600",
+        upsert: false,
+      });
+
+    if (uploadError) {
+      alert(uploadError.message);
+
+      if (targetField === "image_url") {
+        setUploadingImage(false);
+      } else {
+        setUploadingRankIcon(false);
+      }
+
+      return;
+    }
+
+    const { data } = supabase.storage
+      .from("product-images")
+      .getPublicUrl(filePath);
+
+    updateForm(targetField, data.publicUrl);
+
+    if (targetField === "image_url") {
+      setUploadingImage(false);
+    } else {
+      setUploadingRankIcon(false);
+    }
   }
 
   async function saveProduct(e: React.FormEvent) {
@@ -233,7 +310,8 @@ export default function AdminProductManager() {
         <div>
           <h2 className="text-xl font-bold">Product Manager</h2>
           <p className="mt-1 text-sm text-zinc-400">
-            Add, edit, delete, and hide listings for accounts, pins, and offers.
+            Add, edit, delete, hide, and upload images for accounts, pins, and
+            offers.
           </p>
         </div>
 
@@ -279,8 +357,7 @@ export default function AdminProductManager() {
               {editingId ? "Edit Listing" : "Add New Listing"}
             </h3>
             <p className="mt-1 text-sm text-zinc-500">
-              Use public image/video URLs for now. File upload can be added
-              later.
+              Upload images from your computer or paste image/video URLs.
             </p>
           </div>
 
@@ -374,19 +451,85 @@ export default function AdminProductManager() {
             />
           </label>
 
-          <label className="grid gap-2">
+          <div className="grid gap-3 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
             <span className="text-sm font-semibold text-zinc-300">
-              Image URL
+              Listing Image
             </span>
+
+            {form.image_url ? (
+              <img
+                src={form.image_url}
+                alt="Listing preview"
+                className="h-40 w-full rounded-xl object-cover"
+              />
+            ) : (
+              <div className="flex h-40 w-full items-center justify-center rounded-xl bg-zinc-800 text-4xl">
+                {categoryIcons[form.category]}
+              </div>
+            )}
+
             <input
-              className="rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
-              placeholder="https://..."
+              type="file"
+              accept="image/*"
+              className="rounded-xl bg-zinc-800 p-3 text-sm"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) uploadProductFile(file, "image_url");
+              }}
+            />
+
+            <input
+              className="rounded-xl bg-zinc-800 p-3 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
+              placeholder="Or paste image URL"
               value={form.image_url}
               onChange={(e) => updateForm("image_url", e.target.value)}
             />
-          </label>
 
-          <label className="grid gap-2">
+            {uploadingImage && (
+              <p className="text-sm text-yellow-300">Uploading image...</p>
+            )}
+          </div>
+
+          <div className="grid gap-3 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
+            <span className="text-sm font-semibold text-zinc-300">
+              Rank Icon Image
+            </span>
+
+            {form.rank_icon_url ? (
+              <img
+                src={form.rank_icon_url}
+                alt="Rank icon preview"
+                className="h-20 w-20 rounded-xl border border-zinc-700 bg-zinc-950 object-cover p-1"
+              />
+            ) : (
+              <div className="flex h-20 w-20 items-center justify-center rounded-xl bg-zinc-800 text-3xl">
+                🏆
+              </div>
+            )}
+
+            <input
+              type="file"
+              accept="image/*"
+              className="rounded-xl bg-zinc-800 p-3 text-sm"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) uploadProductFile(file, "rank_icon_url");
+              }}
+            />
+
+            <input
+              className="rounded-xl bg-zinc-800 p-3 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
+              placeholder="Or paste rank icon URL"
+              value={form.rank_icon_url}
+              onChange={(e) => updateForm("rank_icon_url", e.target.value)}
+            />
+
+            {uploadingRankIcon && (
+              <p className="text-sm text-yellow-300">Uploading rank icon...</p>
+            )}
+          </div>
+
+          <label className="grid gap-2 md:col-span-2">
             <span className="text-sm font-semibold text-zinc-300">
               Video URL
             </span>
@@ -395,18 +538,6 @@ export default function AdminProductManager() {
               placeholder="https://...mp4"
               value={form.video_url}
               onChange={(e) => updateForm("video_url", e.target.value)}
-            />
-          </label>
-
-          <label className="grid gap-2">
-            <span className="text-sm font-semibold text-zinc-300">
-              Rank Icon URL
-            </span>
-            <input
-              className="rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
-              placeholder="https://..."
-              value={form.rank_icon_url}
-              onChange={(e) => updateForm("rank_icon_url", e.target.value)}
             />
           </label>
 
@@ -482,11 +613,7 @@ export default function AdminProductManager() {
                       />
                     ) : (
                       <div className="flex h-full w-full items-center justify-center text-3xl">
-                        {product.category === "accounts"
-                          ? "🎮"
-                          : product.category === "pins"
-                          ? "📌"
-                          : "🔥"}
+                        {categoryIcons[product.category]}
                       </div>
                     )}
 
@@ -520,6 +647,10 @@ export default function AdminProductManager() {
 
                     <p className="mt-2 text-sm font-bold text-yellow-300">
                       SGD{Number(product.price ?? 0).toFixed(2)}
+                    </p>
+
+                    <p className="mt-1 text-xs text-zinc-500">
+                      {product.delivery_time || "Manual review"}
                     </p>
 
                     <div className="mt-3 flex flex-wrap gap-2">

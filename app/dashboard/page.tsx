@@ -18,6 +18,7 @@ type Order = {
   completed_at: string | null;
   user_seen_update: boolean | null;
   admin_archived: boolean | null;
+  notes?: string | null;
 };
 
 type OrderRequest = {
@@ -34,6 +35,7 @@ type OrderRequest = {
 
 type Profile = {
   email: string | null;
+  username: string | null;
   credits: number | null;
 };
 
@@ -45,13 +47,17 @@ type Message = {
   created_at: string;
 };
 
+type DashboardTab = "overview" | "orders" | "requests" | "history";
+
 export default function DashboardPage() {
   const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
 
   const [orders, setOrders] = useState<Order[]>([]);
   const [requests, setRequests] = useState<OrderRequest[]>([]);
+
   const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
   const [credits, setCredits] = useState(0);
 
   const [messages, setMessages] = useState<Message[]>([]);
@@ -59,6 +65,11 @@ export default function DashboardPage() {
   const [currentUserId, setCurrentUserId] = useState("");
 
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<DashboardTab>("overview");
+  const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
+  const [expandedRequestId, setExpandedRequestId] = useState<string | null>(
+    null
+  );
 
   useEffect(() => {
     async function loadData() {
@@ -78,12 +89,13 @@ export default function DashboardPage() {
 
       const { data: profile, error: profileError } = await supabase
         .from("profiles")
-        .select("email, credits")
+        .select("email, username, credits")
         .eq("id", user.id)
         .single();
 
       if (!profileError && profile) {
         const userProfile = profile as Profile;
+        setUsername(userProfile.username ?? "");
         setCredits(Number(userProfile.credits ?? 0));
       }
 
@@ -170,6 +182,31 @@ export default function DashboardPage() {
     );
   }
 
+  async function markAllRead() {
+    const unreadIds = orders
+      .filter((order) => order.user_seen_update === false)
+      .map((order) => order.id);
+
+    if (unreadIds.length === 0) return;
+
+    const { error } = await supabase
+      .from("orders")
+      .update({ user_seen_update: true })
+      .in("id", unreadIds);
+
+    if (error) {
+      alert(error.message);
+      return;
+    }
+
+    setOrders((prev) =>
+      prev.map((order) => ({
+        ...order,
+        user_seen_update: false === order.user_seen_update ? true : order.user_seen_update,
+      }))
+    );
+  }
+
   async function sendMessage(orderId: string) {
     const text = chatInputs[orderId]?.trim();
 
@@ -209,13 +246,29 @@ export default function DashboardPage() {
   const activeOrders = orders.filter((order) => order.status !== "completed");
   const completedOrders = orders.filter((order) => order.status === "completed");
 
-  const unreadOrderCount = orders.filter(
+  const unreadOrders = orders.filter(
     (order) => order.user_seen_update === false
-  ).length;
+  );
 
-  const pendingRequestCount = requests.filter(
+  const pendingRequests = requests.filter(
     (request) => request.status === "pending"
-  ).length;
+  );
+
+  const latestOrders = [...orders]
+    .sort((a, b) => {
+      const dateA = new Date(a.updated_at || a.created_at).getTime();
+      const dateB = new Date(b.updated_at || b.created_at).getTime();
+      return dateB - dateA;
+    })
+    .slice(0, 3);
+
+  const latestRequests = [...requests]
+    .sort((a, b) => {
+      const dateA = new Date(a.updated_at || a.created_at).getTime();
+      const dateB = new Date(b.updated_at || b.created_at).getTime();
+      return dateB - dateA;
+    })
+    .slice(0, 3);
 
   if (loading) {
     return (
@@ -233,7 +286,7 @@ export default function DashboardPage() {
   return (
     <PageShell
       title="Dashboard"
-      subtitle="Track your submitted requests, active orders, completed boost history, credits, and admin messages."
+      subtitle="Track your requests, orders, credits, completed history, and admin chat."
       rightAction={
         <div className="flex flex-wrap gap-3">
           <Link
@@ -252,199 +305,367 @@ export default function DashboardPage() {
         </div>
       }
     >
-      {unreadOrderCount > 0 && (
-        <div className="mb-6 rounded-2xl border border-yellow-400/40 bg-yellow-400/10 p-5">
-          <div className="flex items-center gap-4">
-            <div className="flex h-11 w-11 items-center justify-center rounded-full bg-yellow-400 text-xl text-black">
-              🔔
+      <section className="grid gap-4 md:grid-cols-4">
+        <QuickLinkCard
+          title="Services"
+          description="Rank boost, trophy boost, coaching, and custom requests."
+          href="/services"
+        />
+
+        <QuickLinkCard
+          title="Accounts"
+          description="Browse account listings and submit purchase requests."
+          href="/accounts"
+        />
+
+        <QuickLinkCard
+          title="Pins"
+          description="Browse exclusive pin listings."
+          href="/pins"
+        />
+
+        <QuickLinkCard
+          title="Offers"
+          description="View limited bundles and special deals."
+          href="/offers"
+        />
+      </section>
+
+      {unreadOrders.length > 0 && (
+        <div className="mt-8 rounded-2xl border border-yellow-400/40 bg-yellow-400/10 p-5">
+          <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
+            <div className="flex items-center gap-4">
+              <div className="flex h-11 w-11 items-center justify-center rounded-full bg-yellow-400 text-xl text-black">
+                🔔
+              </div>
+
+              <div>
+                <h2 className="font-bold text-yellow-300">
+                  Unread Order Updates
+                </h2>
+                <p className="text-sm text-zinc-300">
+                  You have {unreadOrders.length} unread update
+                  {unreadOrders.length === 1 ? "" : "s"}.
+                </p>
+              </div>
             </div>
 
-            <div>
-              <h2 className="font-bold text-yellow-300">
-                Unread Order Update
-              </h2>
-              <p className="text-sm text-zinc-300">
-                You have {unreadOrderCount} unread order update
-                {unreadOrderCount === 1 ? "" : "s"}.
-              </p>
-            </div>
+            <button
+              onClick={markAllRead}
+              className="rounded-xl bg-yellow-400 px-4 py-2 text-sm font-bold text-black hover:bg-yellow-300"
+            >
+              Mark all as read
+            </button>
           </div>
         </div>
       )}
 
-      <div className="grid gap-4 md:grid-cols-5">
-        <StatCard label="Account" value={email || "N/A"} small />
+      <section className="mt-8 grid gap-4 md:grid-cols-5">
+        <StatCard
+          label="User"
+          value={username || email || "N/A"}
+          subValue={username ? email : undefined}
+          small
+        />
+
         <StatCard label="Credits" value={`$${credits.toFixed(2)}`} highlight />
         <StatCard label="Requests" value={requests.length} />
         <StatCard label="Active Orders" value={activeOrders.length} />
         <StatCard label="Completed" value={completedOrders.length} />
-      </div>
+      </section>
 
-      <section className="mt-10">
-        <div className="flex flex-col justify-between gap-3 md:flex-row md:items-end">
-          <div>
-            <h2 className="text-2xl font-bold">Your Requests</h2>
-            <p className="mt-1 text-sm text-zinc-400">
-              Requests submitted from the services page. Admin will review them.
-            </p>
-          </div>
+      <section className="mt-8">
+        <div className="flex flex-wrap gap-2">
+          <TabButton
+            label="Overview"
+            active={activeTab === "overview"}
+            onClick={() => setActiveTab("overview")}
+          />
 
-          <p className="text-sm text-zinc-500">
-            Pending requests: {pendingRequestCount}
-          </p>
+          <TabButton
+            label={`Active Orders (${activeOrders.length})`}
+            active={activeTab === "orders"}
+            onClick={() => setActiveTab("orders")}
+          />
+
+          <TabButton
+            label={`Requests (${requests.length})`}
+            active={activeTab === "requests"}
+            onClick={() => setActiveTab("requests")}
+          />
+
+          <TabButton
+            label={`History (${completedOrders.length})`}
+            active={activeTab === "history"}
+            onClick={() => setActiveTab("history")}
+          />
         </div>
+      </section>
 
-        <div className="mt-6 grid gap-5">
-          {requests.length === 0 && (
-            <div className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-8 text-center">
-              <p className="text-zinc-400">
-                No requests yet. Submit one from the services page.
-              </p>
+      {activeTab === "overview" && (
+        <section className="mt-8 grid gap-6 lg:grid-cols-2">
+          <Panel
+            title="Recent Orders"
+            subtitle="Latest order activity from admin."
+            rightAction={
+              <button
+                onClick={() => setActiveTab("orders")}
+                className="text-sm font-semibold text-yellow-300 hover:text-yellow-200"
+              >
+                View all
+              </button>
+            }
+          >
+            <div className="mt-5 grid gap-4">
+              {latestOrders.length === 0 && (
+                <EmptyState text="No order activity yet." />
+              )}
 
+              {latestOrders.map((order) => (
+                <CompactOrderCard
+                  key={order.id}
+                  order={order}
+                  formatDate={formatDate}
+                  onOpen={() => {
+                    setActiveTab("orders");
+                    setExpandedOrderId(order.id);
+                  }}
+                />
+              ))}
+            </div>
+          </Panel>
+
+          <Panel
+            title="Recent Requests"
+            subtitle="Latest requests submitted for admin review."
+            rightAction={
+              <button
+                onClick={() => setActiveTab("requests")}
+                className="text-sm font-semibold text-yellow-300 hover:text-yellow-200"
+              >
+                View all
+              </button>
+            }
+          >
+            <div className="mt-5 grid gap-4">
+              {latestRequests.length === 0 && (
+                <EmptyState text="No requests yet." />
+              )}
+
+              {latestRequests.map((request) => (
+                <CompactRequestCard
+                  key={request.id}
+                  request={request}
+                  formatDate={formatDate}
+                  onOpen={() => {
+                    setActiveTab("requests");
+                    setExpandedRequestId(request.id);
+                  }}
+                />
+              ))}
+            </div>
+          </Panel>
+
+          <Panel
+            title="What to do next"
+            subtitle="Common actions for your account."
+          >
+            <div className="mt-5 grid gap-3">
+              <ActionRow
+                title="Submit a new boost request"
+                description="Rank boost, trophy boost, prestige, coaching, or custom."
+                href="/services"
+              />
+
+              <ActionRow
+                title="Browse account listings"
+                description="Request an account listing for admin review."
+                href="/accounts"
+              />
+
+              <ActionRow
+                title="Check special offers"
+                description="Limited-time bundles and deals."
+                href="/offers"
+              />
+            </div>
+          </Panel>
+
+          <Panel
+            title="Account Status"
+            subtitle="Quick account summary."
+          >
+            <div className="mt-5 grid gap-3 text-sm">
+              <InfoRow label="Username" value={username || "Not set"} />
+              <InfoRow label="Email" value={email || "N/A"} />
+              <InfoRow label="Credits" value={`$${credits.toFixed(2)}`} />
+              <InfoRow label="Pending Requests" value={pendingRequests.length} />
+              <InfoRow label="Unread Updates" value={unreadOrders.length} />
+            </div>
+          </Panel>
+        </section>
+      )}
+
+      {activeTab === "orders" && (
+        <section className="mt-8">
+          <SectionHeader
+            title="Active Orders"
+            subtitle="Orders currently pending, accepted, in progress, rejected, or cancelled."
+          />
+
+          <div className="mt-6 grid gap-5">
+            {activeOrders.length === 0 && (
+              <EmptyState text="No active orders assigned yet. Accepted requests may become orders later." />
+            )}
+
+            {activeOrders.map((order) => (
+              <OrderCard
+                key={order.id}
+                order={order}
+                messages={messages}
+                currentUserId={currentUserId}
+                chatInputs={chatInputs}
+                setChatInputs={setChatInputs}
+                sendMessage={sendMessage}
+                markOrderUpdateRead={markOrderUpdateRead}
+                formatDate={formatDate}
+                showChat
+                expanded={expandedOrderId === order.id}
+                onToggle={() =>
+                  setExpandedOrderId((prev) =>
+                    prev === order.id ? null : order.id
+                  )
+                }
+              />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {activeTab === "requests" && (
+        <section className="mt-8">
+          <SectionHeader
+            title="Your Requests"
+            subtitle="Requests submitted from services, accounts, pins, and offers."
+            rightAction={
               <Link
                 href="/services"
-                className="mt-5 inline-flex rounded-xl bg-yellow-400 px-5 py-3 font-bold text-black hover:bg-yellow-300"
+                className="rounded-xl bg-yellow-400 px-4 py-2 text-sm font-bold text-black hover:bg-yellow-300"
               >
-                Browse Services
+                Submit Request
               </Link>
-            </div>
-          )}
+            }
+          />
 
-          {requests.map((request) => (
-            <div
-              key={request.id}
-              className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-6"
-            >
-              <div className="flex flex-col justify-between gap-4 md:flex-row md:items-start">
-                <div>
-                  <div className="flex flex-wrap items-center gap-3">
-                    <h3 className="text-xl font-bold">
-                      {request.service_type}
-                    </h3>
-                    <StatusBadge status={request.status} />
-                  </div>
+          <div className="mt-6 grid gap-5">
+            {requests.length === 0 && (
+              <div className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-8 text-center">
+                <p className="text-zinc-400">
+                  No requests yet. Submit one from the services page.
+                </p>
 
-                  <p className="mt-2 text-sm text-zinc-400">
-                    {request.current_rank || "N/A"} →{" "}
-                    {request.target_rank || "N/A"}
-                  </p>
-                </div>
+                <Link
+                  href="/services"
+                  className="mt-5 inline-flex rounded-xl bg-yellow-400 px-5 py-3 font-bold text-black hover:bg-yellow-300"
+                >
+                  Browse Services
+                </Link>
               </div>
+            )}
 
-              <div className="mt-5 grid gap-3 text-sm text-zinc-400 md:grid-cols-2">
-                <DateBox label="Submitted" value={formatDate(request.created_at)} />
-                <DateBox label="Last Updated" value={formatDate(request.updated_at)} />
-              </div>
+            {requests.map((request) => (
+              <RequestCard
+                key={request.id}
+                request={request}
+                formatDate={formatDate}
+                expanded={expandedRequestId === request.id}
+                onToggle={() =>
+                  setExpandedRequestId((prev) =>
+                    prev === request.id ? null : request.id
+                  )
+                }
+              />
+            ))}
+          </div>
+        </section>
+      )}
 
-              {request.status === "pending" && (
-                <InfoBox tone="yellow">
-                  Your request is pending admin review.
-                </InfoBox>
-              )}
+      {activeTab === "history" && (
+        <section className="mt-8">
+          <SectionHeader
+            title="Completed Boost History"
+            subtitle="Completed orders remain visible here as your order history."
+          />
 
-              {request.status === "accepted" && (
-                <InfoBox tone="green">
-                  Your request has been accepted. Admin may assign an order soon.
-                </InfoBox>
-              )}
+          <div className="mt-6 grid gap-5">
+            {completedOrders.length === 0 && (
+              <EmptyState text="No completed boosts yet." />
+            )}
 
-              {request.status === "rejected" && (
-                <InfoBox tone="red">
-                  Your request was rejected.
-                  {request.admin_notes
-                    ? ` Admin note: ${request.admin_notes}`
-                    : ""}
-                </InfoBox>
-              )}
-
-              {request.status === "converted_to_order" && (
-                <InfoBox tone="blue">
-                  This request has been converted into an active order.
-                </InfoBox>
-              )}
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="mt-10">
-        <div>
-          <h2 className="text-2xl font-bold">Active Orders</h2>
-          <p className="mt-1 text-sm text-zinc-400">
-            Orders currently being reviewed, accepted, or in progress.
-          </p>
-        </div>
-
-        <div className="mt-6 grid gap-5">
-          {activeOrders.length === 0 && (
-            <EmptyState text="No active orders assigned yet. Accepted requests may become orders later." />
-          )}
-
-          {activeOrders.map((order) => (
-            <OrderCard
-              key={order.id}
-              order={order}
-              messages={messages}
-              currentUserId={currentUserId}
-              chatInputs={chatInputs}
-              setChatInputs={setChatInputs}
-              sendMessage={sendMessage}
-              markOrderUpdateRead={markOrderUpdateRead}
-              formatDate={formatDate}
-              showChat
-            />
-          ))}
-        </div>
-      </section>
-
-      <section className="mt-10">
-        <div>
-          <h2 className="text-2xl font-bold">Completed Boost History</h2>
-          <p className="mt-1 text-sm text-zinc-400">
-            Completed orders remain visible here even after admin removes them
-            from the active admin list.
-          </p>
-        </div>
-
-        <div className="mt-6 grid gap-5">
-          {completedOrders.length === 0 && (
-            <EmptyState text="No completed boosts yet." />
-          )}
-
-          {completedOrders.map((order) => (
-            <OrderCard
-              key={order.id}
-              order={order}
-              messages={messages}
-              currentUserId={currentUserId}
-              chatInputs={chatInputs}
-              setChatInputs={setChatInputs}
-              sendMessage={sendMessage}
-              markOrderUpdateRead={markOrderUpdateRead}
-              formatDate={formatDate}
-              showChat={false}
-            />
-          ))}
-        </div>
-      </section>
+            {completedOrders.map((order) => (
+              <OrderCard
+                key={order.id}
+                order={order}
+                messages={messages}
+                currentUserId={currentUserId}
+                chatInputs={chatInputs}
+                setChatInputs={setChatInputs}
+                sendMessage={sendMessage}
+                markOrderUpdateRead={markOrderUpdateRead}
+                formatDate={formatDate}
+                showChat={false}
+                expanded={expandedOrderId === order.id}
+                onToggle={() =>
+                  setExpandedOrderId((prev) =>
+                    prev === order.id ? null : order.id
+                  )
+                }
+              />
+            ))}
+          </div>
+        </section>
+      )}
     </PageShell>
+  );
+}
+
+function QuickLinkCard({
+  title,
+  description,
+  href,
+}: {
+  title: string;
+  description: string;
+  href: string;
+}) {
+  return (
+    <Link
+      href={href}
+      className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-5 transition hover:border-yellow-400/50 hover:bg-zinc-900"
+    >
+      <p className="font-bold text-yellow-300">{title}</p>
+      <p className="mt-2 text-sm leading-6 text-zinc-400">{description}</p>
+    </Link>
   );
 }
 
 function StatCard({
   label,
   value,
+  subValue,
   highlight = false,
   small = false,
 }: {
   label: string;
   value: string | number;
+  subValue?: string;
   highlight?: boolean;
   small?: boolean;
 }) {
   return (
     <div className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-6">
       <p className="text-sm text-zinc-400">{label}</p>
+
       <h2
         className={`mt-2 truncate font-bold ${
           small ? "text-lg" : "text-4xl"
@@ -452,6 +673,87 @@ function StatCard({
       >
         {value}
       </h2>
+
+      {subValue && <p className="mt-1 truncate text-xs text-zinc-500">{subValue}</p>}
+    </div>
+  );
+}
+
+function TabButton({
+  label,
+  active,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`rounded-xl px-4 py-2 text-sm font-semibold ${
+        active
+          ? "bg-yellow-400 text-black"
+          : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700 hover:text-white"
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
+
+function Panel({
+  title,
+  subtitle,
+  children,
+  rightAction,
+}: {
+  title: string;
+  subtitle?: string;
+  children: React.ReactNode;
+  rightAction?: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-6">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-xl font-bold">{title}</h2>
+          {subtitle && <p className="mt-1 text-sm text-zinc-400">{subtitle}</p>}
+        </div>
+
+        {rightAction}
+      </div>
+
+      {children}
+    </div>
+  );
+}
+
+function SectionHeader({
+  title,
+  subtitle,
+  rightAction,
+}: {
+  title: string;
+  subtitle: string;
+  rightAction?: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
+      <div>
+        <h2 className="text-2xl font-bold">{title}</h2>
+        <p className="mt-1 text-sm text-zinc-400">{subtitle}</p>
+      </div>
+
+      {rightAction}
+    </div>
+  );
+}
+
+function EmptyState({ text }: { text: string }) {
+  return (
+    <div className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-8 text-center text-zinc-400">
+      {text}
     </div>
   );
 }
@@ -460,7 +762,7 @@ function DateBox({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-xl border border-zinc-800 bg-zinc-950/80 p-3">
       <p className="text-xs text-zinc-500">{label}</p>
-      <p className="mt-1">{value}</p>
+      <p className="mt-1 text-sm text-zinc-300">{value}</p>
     </div>
   );
 }
@@ -486,10 +788,170 @@ function InfoBox({
   );
 }
 
-function EmptyState({ text }: { text: string }) {
+function InfoRow({ label, value }: { label: string; value: string | number }) {
   return (
-    <div className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-8 text-center text-zinc-400">
-      {text}
+    <div className="flex items-center justify-between gap-4 rounded-xl bg-zinc-950/80 p-3">
+      <span className="text-zinc-500">{label}</span>
+      <span className="font-semibold text-zinc-200">{value}</span>
+    </div>
+  );
+}
+
+function ActionRow({
+  title,
+  description,
+  href,
+}: {
+  title: string;
+  description: string;
+  href: string;
+}) {
+  return (
+    <Link
+      href={href}
+      className="rounded-xl border border-zinc-800 bg-zinc-950/80 p-4 hover:border-yellow-400/40"
+    >
+      <p className="font-semibold">{title}</p>
+      <p className="mt-1 text-sm text-zinc-500">{description}</p>
+    </Link>
+  );
+}
+
+function CompactOrderCard({
+  order,
+  formatDate,
+  onOpen,
+}: {
+  order: Order;
+  formatDate: (date: string | null) => string;
+  onOpen: () => void;
+}) {
+  return (
+    <button
+      onClick={onOpen}
+      className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-4 text-left hover:border-yellow-400/40"
+    >
+      <div className="flex flex-wrap items-center gap-3">
+        <p className="font-bold">{order.service_type}</p>
+        <StatusBadge status={order.status} />
+
+        {order.user_seen_update === false && (
+          <span className="rounded-full bg-yellow-400 px-2 py-1 text-xs font-bold text-black">
+            New
+          </span>
+        )}
+      </div>
+
+      <p className="mt-2 text-sm text-zinc-400">
+        {order.current_rank || "N/A"} → {order.target_rank || "N/A"}
+      </p>
+
+      <p className="mt-2 text-xs text-zinc-500">
+        Updated: {formatDate(order.updated_at || order.created_at)}
+      </p>
+    </button>
+  );
+}
+
+function CompactRequestCard({
+  request,
+  formatDate,
+  onOpen,
+}: {
+  request: OrderRequest;
+  formatDate: (date: string | null) => string;
+  onOpen: () => void;
+}) {
+  return (
+    <button
+      onClick={onOpen}
+      className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-4 text-left hover:border-yellow-400/40"
+    >
+      <div className="flex flex-wrap items-center gap-3">
+        <p className="font-bold">{request.service_type}</p>
+        <StatusBadge status={request.status} />
+      </div>
+
+      <p className="mt-2 text-sm text-zinc-400">
+        {request.current_rank || "N/A"} → {request.target_rank || "N/A"}
+      </p>
+
+      <p className="mt-2 text-xs text-zinc-500">
+        Updated: {formatDate(request.updated_at || request.created_at)}
+      </p>
+    </button>
+  );
+}
+
+function RequestCard({
+  request,
+  formatDate,
+  expanded,
+  onToggle,
+}: {
+  request: OrderRequest;
+  formatDate: (date: string | null) => string;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <div className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-6">
+      <div className="flex flex-col justify-between gap-4 md:flex-row md:items-start">
+        <div>
+          <div className="flex flex-wrap items-center gap-3">
+            <h3 className="text-xl font-bold">{request.service_type}</h3>
+            <StatusBadge status={request.status} />
+          </div>
+
+          <p className="mt-2 text-sm text-zinc-400">
+            {request.current_rank || "N/A"} → {request.target_rank || "N/A"}
+          </p>
+        </div>
+
+        <button
+          onClick={onToggle}
+          className="rounded-xl bg-zinc-800 px-4 py-2 text-sm hover:bg-zinc-700"
+        >
+          {expanded ? "Hide Details" : "View Details"}
+        </button>
+      </div>
+
+      <div className="mt-5 grid gap-3 text-sm text-zinc-400 md:grid-cols-2">
+        <DateBox label="Submitted" value={formatDate(request.created_at)} />
+        <DateBox label="Last Updated" value={formatDate(request.updated_at)} />
+      </div>
+
+      {request.status === "pending" && (
+        <InfoBox tone="yellow">Your request is pending admin review.</InfoBox>
+      )}
+
+      {request.status === "accepted" && (
+        <InfoBox tone="green">
+          Your request has been accepted. Admin may assign an order soon.
+        </InfoBox>
+      )}
+
+      {request.status === "rejected" && (
+        <InfoBox tone="red">
+          Your request was rejected.
+          {request.admin_notes ? ` Admin note: ${request.admin_notes}` : ""}
+        </InfoBox>
+      )}
+
+      {request.status === "converted_to_order" && (
+        <InfoBox tone="blue">
+          This request has been converted into an active order.
+        </InfoBox>
+      )}
+
+      {expanded && (
+        <div className="mt-5 rounded-2xl border border-zinc-800 bg-zinc-950/80 p-4">
+          <h4 className="font-semibold">Request Notes</h4>
+          <p className="mt-3 whitespace-pre-wrap text-sm text-zinc-400">
+            {request.notes || "No notes."}
+          </p>
+        </div>
+      )}
     </div>
   );
 }
@@ -504,6 +966,8 @@ function OrderCard({
   markOrderUpdateRead,
   formatDate,
   showChat,
+  expanded,
+  onToggle,
 }: {
   order: Order;
   messages: Message[];
@@ -514,6 +978,8 @@ function OrderCard({
   markOrderUpdateRead: (orderId: string) => Promise<void>;
   formatDate: (date: string | null) => string;
   showChat: boolean;
+  expanded: boolean;
+  onToggle: () => void;
 }) {
   const orderMessages = messages.filter(
     (message) => message.order_id === order.id
@@ -545,14 +1011,23 @@ function OrderCard({
           </p>
         </div>
 
-        {order.user_seen_update === false && (
+        <div className="flex flex-wrap gap-2">
+          {order.user_seen_update === false && (
+            <button
+              onClick={() => markOrderUpdateRead(order.id)}
+              className="rounded-xl bg-yellow-400 px-4 py-2 text-sm font-bold text-black hover:bg-yellow-300"
+            >
+              Mark as read
+            </button>
+          )}
+
           <button
-            onClick={() => markOrderUpdateRead(order.id)}
-            className="rounded-xl bg-yellow-400 px-4 py-2 text-sm font-bold text-black hover:bg-yellow-300"
+            onClick={onToggle}
+            className="rounded-xl bg-zinc-800 px-4 py-2 text-sm hover:bg-zinc-700"
           >
-            Mark as read
+            {expanded ? "Hide Details" : "View Details"}
           </button>
-        )}
+        </div>
       </div>
 
       <div className="mt-5 grid gap-3 text-sm text-zinc-400 md:grid-cols-3">
@@ -580,7 +1055,16 @@ function OrderCard({
         </InfoBox>
       )}
 
-      {showChat && (
+      {expanded && (
+        <div className="mt-5 rounded-2xl border border-zinc-800 bg-zinc-950/80 p-4">
+          <h4 className="font-semibold">Order Details</h4>
+          <p className="mt-3 whitespace-pre-wrap text-sm text-zinc-400">
+            {order.notes || "No additional notes."}
+          </p>
+        </div>
+      )}
+
+      {showChat && expanded && (
         <div className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-950/80 p-5">
           <div className="flex items-center justify-between">
             <h4 className="font-semibold">Chat with Admin</h4>

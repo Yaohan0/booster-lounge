@@ -1,4 +1,5 @@
 "use client";
+
 import AdminProductManager from "../../components/AdminProductManager";
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabaseClient";
@@ -9,6 +10,7 @@ import StatusBadge from "@/components/StatusBadge";
 type Profile = {
   id: string;
   email: string | null;
+  username: string | null;
   role: string | null;
   credits: number | null;
 };
@@ -49,6 +51,14 @@ type Message = {
   created_at: string;
 };
 
+type OrderEditData = {
+  service_type: string;
+  current_rank: string;
+  target_rank: string;
+  notes: string;
+  status: string;
+};
+
 export default function AdminPage() {
   const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
@@ -62,7 +72,7 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(true);
 
   const [selectedUserId, setSelectedUserId] = useState("");
-  const [serviceType, setServiceType] = useState("Coaching Session");
+  const [serviceType, setServiceType] = useState("Rank Boost");
   const [currentRank, setCurrentRank] = useState("");
   const [targetRank, setTargetRank] = useState("");
   const [notes, setNotes] = useState("");
@@ -75,6 +85,10 @@ export default function AdminPage() {
   const [orderSearch, setOrderSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [selectedProfileId, setSelectedProfileId] = useState("");
+
+  const [usernameInputs, setUsernameInputs] = useState<Record<string, string>>(
+    {}
+  );
 
   useEffect(() => {
     async function loadAdminData() {
@@ -119,10 +133,21 @@ export default function AdminPage() {
     }).format(new Date(date));
   }
 
+  function getUserLabel(userId: string) {
+    const profile = profiles.find((item) => item.id === userId);
+
+    if (!profile) return userId;
+
+    const username = profile.username || "No username";
+    const email = profile.email || "No email";
+
+    return `${username} • ${email}`;
+  }
+
   async function refreshAdminData() {
     const { data: profileData, error: profileError } = await supabase
       .from("profiles")
-      .select("id, email, role, credits")
+      .select("id, email, username, role, credits")
       .order("created_at", { ascending: false });
 
     if (profileError) {
@@ -160,7 +185,17 @@ export default function AdminPage() {
       return;
     }
 
-    if (profileData) setProfiles(profileData);
+    if (profileData) {
+      setProfiles(profileData);
+      const nextInputs: Record<string, string> = {};
+
+      profileData.forEach((profile) => {
+        nextInputs[profile.id] = profile.username || "";
+      });
+
+      setUsernameInputs(nextInputs);
+    }
+
     if (orderData) setOrders(orderData);
     if (requestData) setRequests(requestData);
     if (messageData) setMessages(messageData);
@@ -191,7 +226,7 @@ export default function AdminPage() {
     }
 
     setSelectedUserId("");
-    setServiceType("Coaching Session");
+    setServiceType("Rank Boost");
     setCurrentRank("");
     setTargetRank("");
     setNotes("");
@@ -222,19 +257,63 @@ export default function AdminPage() {
 
     setOrders((prev) =>
       prev.map((order) =>
-        order.id === orderId
-          ? {
-              ...order,
-              ...updateData,
-            }
-          : order
+        order.id === orderId ? { ...order, ...updateData } : order
       )
     );
   }
 
+  async function updateOrderDetails(orderId: string, data: OrderEditData) {
+    const payload: Partial<Order> = {
+      service_type: data.service_type,
+      current_rank: data.current_rank,
+      target_rank: data.target_rank,
+      notes: data.notes,
+      status: data.status,
+      updated_at: new Date().toISOString(),
+      user_seen_update: false,
+    };
+
+    if (data.status === "completed") {
+      payload.completed_at = new Date().toISOString();
+    }
+
+    const { error } = await supabase
+      .from("orders")
+      .update(payload)
+      .eq("id", orderId);
+
+    if (error) {
+      alert(error.message);
+      return;
+    }
+
+    setOrders((prev) =>
+      prev.map((order) =>
+        order.id === orderId ? { ...order, ...payload } : order
+      )
+    );
+  }
+
+  async function deleteOrder(order: Order) {
+    const confirmed = confirm(
+      `Delete this ${order.status} order permanently? This cannot be undone.`
+    );
+
+    if (!confirmed) return;
+
+    const { error } = await supabase.from("orders").delete().eq("id", order.id);
+
+    if (error) {
+      alert(error.message);
+      return;
+    }
+
+    setOrders((prev) => prev.filter((item) => item.id !== order.id));
+  }
+
   async function archiveCompletedOrder(orderId: string) {
     const confirmed = confirm(
-      "Remove this completed order from the active admin list? The user will still see it in their completed history."
+      "Remove this completed order from the active admin list? The user will still see it in completed history."
     );
 
     if (!confirmed) return;
@@ -292,27 +371,6 @@ export default function AdminPage() {
     );
   }
 
-  async function deleteRejectedOrder(orderId: string) {
-    const confirmed = confirm(
-      "Delete this rejected order permanently? This cannot be undone."
-    );
-
-    if (!confirmed) return;
-
-    const { error } = await supabase
-      .from("orders")
-      .delete()
-      .eq("id", orderId)
-      .eq("status", "rejected");
-
-    if (error) {
-      alert(error.message);
-      return;
-    }
-
-    setOrders((prev) => prev.filter((order) => order.id !== orderId));
-  }
-
   async function updateCredits(userId: string, credits: number) {
     const { error } = await supabase
       .from("profiles")
@@ -331,10 +389,38 @@ export default function AdminPage() {
     );
   }
 
+  async function updateUsername(userId: string) {
+    const username = usernameInputs[userId]?.trim();
+
+    if (!username) {
+      alert("Username cannot be empty.");
+      return;
+    }
+
+    const { error } = await supabase
+      .from("profiles")
+      .update({ username })
+      .eq("id", userId);
+
+    if (error) {
+      alert(error.message);
+      return;
+    }
+
+    setProfiles((prev) =>
+      prev.map((profile) =>
+        profile.id === userId ? { ...profile, username } : profile
+      )
+    );
+  }
+
   async function updateRequestStatus(requestId: string, status: string) {
     const { error } = await supabase
       .from("order_requests")
-      .update({ status })
+      .update({
+        status,
+        updated_at: new Date().toISOString(),
+      })
       .eq("id", requestId);
 
     if (error) {
@@ -345,11 +431,7 @@ export default function AdminPage() {
     setRequests((prev) =>
       prev.map((request) =>
         request.id === requestId
-          ? {
-              ...request,
-              status,
-              updated_at: new Date().toISOString(),
-            }
+          ? { ...request, status, updated_at: new Date().toISOString() }
           : request
       )
     );
@@ -374,7 +456,10 @@ export default function AdminPage() {
 
     const { error: requestError } = await supabase
       .from("order_requests")
-      .update({ status: "converted_to_order" })
+      .update({
+        status: "converted_to_order",
+        updated_at: new Date().toISOString(),
+      })
       .eq("id", request.id);
 
     if (requestError) {
@@ -416,9 +501,7 @@ export default function AdminPage() {
       return;
     }
 
-    if (messageData) {
-      setMessages(messageData);
-    }
+    if (messageData) setMessages(messageData);
   }
 
   async function logout() {
@@ -426,16 +509,25 @@ export default function AdminPage() {
     router.push("/");
   }
 
-  const filteredProfiles = profiles.filter((profile) =>
-    profile.email?.toLowerCase().includes(userSearch.toLowerCase())
-  );
-
-  const filteredRequests = requests.filter((request) => {
-    const user = profiles.find((profile) => profile.id === request.user_id);
-    const search = requestSearch.toLowerCase();
+  const filteredProfiles = profiles.filter((profile) => {
+    const search = userSearch.toLowerCase();
 
     return (
+      profile.email?.toLowerCase().includes(search) ||
+      profile.username?.toLowerCase().includes(search) ||
+      profile.role?.toLowerCase().includes(search)
+    );
+  });
+
+  const filteredRequests = requests.filter((request) => {
+    const search = requestSearch.toLowerCase();
+    const user = profiles.find((profile) => profile.id === request.user_id);
+    const userLabel = getUserLabel(request.user_id).toLowerCase();
+
+    return (
+      userLabel.includes(search) ||
       user?.email?.toLowerCase().includes(search) ||
+      user?.username?.toLowerCase().includes(search) ||
       request.service_type.toLowerCase().includes(search) ||
       request.current_rank?.toLowerCase().includes(search) ||
       request.target_rank?.toLowerCase().includes(search) ||
@@ -447,15 +539,16 @@ export default function AdminPage() {
   const activeOrders = orders.filter((order) => order.admin_archived !== true);
 
   const filteredOrders = activeOrders.filter((order) => {
-    const user = profiles.find((profile) => profile.id === order.user_id);
     const search = orderSearch.toLowerCase();
+    const userLabel = getUserLabel(order.user_id).toLowerCase();
 
     const matchesSearch =
-      user?.email?.toLowerCase().includes(search) ||
+      userLabel.includes(search) ||
       order.service_type.toLowerCase().includes(search) ||
       order.current_rank?.toLowerCase().includes(search) ||
       order.target_rank?.toLowerCase().includes(search) ||
-      order.notes?.toLowerCase().includes(search);
+      order.notes?.toLowerCase().includes(search) ||
+      order.status.toLowerCase().includes(search);
 
     const matchesStatus =
       statusFilter === "all" || order.status === statusFilter;
@@ -488,7 +581,7 @@ export default function AdminPage() {
   return (
     <PageShell
       title="Admin Panel"
-      subtitle="Assign orders, review requests, manage credits, delete rejected orders, and view completed boost history."
+      subtitle="Manage requests, orders, users, credits, products, and account tracking."
       rightAction={
         <button
           onClick={logout}
@@ -509,7 +602,7 @@ export default function AdminPage() {
 
       <Panel
         title="Assign New Order"
-        subtitle="Create a new active order and assign it to a normal user."
+        subtitle="Create a new active order and assign it to a tracked user."
       >
         <form onSubmit={assignOrder} className="mt-5 grid gap-4">
           <div className="grid gap-4 md:grid-cols-2">
@@ -523,7 +616,7 @@ export default function AdminPage() {
                 .filter((profile) => profile.role !== "admin")
                 .map((profile) => (
                   <option key={profile.id} value={profile.id}>
-                    {profile.email}
+                    {profile.username || "No username"} • {profile.email}
                   </option>
                 ))}
             </select>
@@ -533,14 +626,14 @@ export default function AdminPage() {
               value={serviceType}
               onChange={(e) => setServiceType(e.target.value)}
             >
-              <option>Coaching Session</option>
-              <option>Rank Improvement Guidance</option>
-              <option>Gameplay Review</option>
-              <option>Team Strategy Help</option>
               <option>Rank Boost</option>
               <option>Trophy Boost</option>
               <option>Prestige Icon</option>
               <option>Brawlers Rank</option>
+              <option>Coaching</option>
+              <option>Account Purchase</option>
+              <option>Exclusive Pins</option>
+              <option>Special Offer</option>
               <option>Custom Request</option>
             </select>
           </div>
@@ -576,11 +669,11 @@ export default function AdminPage() {
 
       <Panel
         title="Incoming Requests"
-        subtitle="Review service requests submitted from the services page."
+        subtitle="Review service, account, pin, and offer requests."
       >
         <input
           className="mt-5 w-full rounded-xl bg-zinc-800 p-3 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
-          placeholder="Search requests by user, service, rank, notes, or status..."
+          placeholder="Search requests by username, email, service, rank, notes, or status..."
           value={requestSearch}
           onChange={(e) => setRequestSearch(e.target.value)}
         />
@@ -590,93 +683,85 @@ export default function AdminPage() {
             <EmptyState text="No incoming requests found." />
           )}
 
-          {filteredRequests.map((request) => {
-            const user = profiles.find(
-              (profile) => profile.id === request.user_id
-            );
-
-            return (
-              <div
-                key={request.id}
-                className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-5"
-              >
-                <div className="flex flex-col justify-between gap-5 md:flex-row">
-                  <div>
-                    <div className="flex flex-wrap items-center gap-3">
-                      <p className="text-lg font-bold">
-                        {request.service_type}
-                      </p>
-                      <StatusBadge status={request.status} />
-                    </div>
-
-                    <p className="mt-2 text-sm text-zinc-400">
-                      User: {user?.email || request.user_id}
-                    </p>
-
-                    <p className="text-sm text-zinc-400">
-                      {request.current_rank || "N/A"} →{" "}
-                      {request.target_rank || "N/A"}
-                    </p>
-
-                    <p className="mt-3 whitespace-pre-wrap text-sm text-zinc-300">
-                      Notes: {request.notes || "None"}
-                    </p>
-
-                    <DateGrid
-                      createdAt={request.created_at}
-                      updatedAt={request.updated_at}
-                      completedAt={null}
-                      formatDate={formatDate}
-                    />
+          {filteredRequests.map((request) => (
+            <div
+              key={request.id}
+              className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-5"
+            >
+              <div className="flex flex-col justify-between gap-5 md:flex-row">
+                <div>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <p className="text-lg font-bold">{request.service_type}</p>
+                    <StatusBadge status={request.status} />
                   </div>
 
-                  <StatusCard label="Request Status" status={request.status} />
+                  <p className="mt-2 text-sm text-zinc-400">
+                    User: {getUserLabel(request.user_id)}
+                  </p>
+
+                  <p className="text-sm text-zinc-400">
+                    {request.current_rank || "N/A"} →{" "}
+                    {request.target_rank || "N/A"}
+                  </p>
+
+                  <p className="mt-3 whitespace-pre-wrap text-sm text-zinc-300">
+                    Notes: {request.notes || "None"}
+                  </p>
+
+                  <DateGrid
+                    createdAt={request.created_at}
+                    updatedAt={request.updated_at}
+                    completedAt={null}
+                    formatDate={formatDate}
+                  />
                 </div>
 
-                <div className="mt-5 flex flex-wrap gap-2">
-                  <RequestButton
-                    label="pending"
-                    active={request.status === "pending"}
-                    onClick={() => updateRequestStatus(request.id, "pending")}
-                  />
-
-                  <RequestButton
-                    label="accept"
-                    active={request.status === "accepted"}
-                    onClick={() => updateRequestStatus(request.id, "accepted")}
-                    variant="green"
-                  />
-
-                  <RequestButton
-                    label="reject"
-                    active={request.status === "rejected"}
-                    onClick={() => updateRequestStatus(request.id, "rejected")}
-                    variant="red"
-                  />
-
-                  <button
-                    onClick={() => convertRequestToOrder(request)}
-                    disabled={request.status === "converted_to_order"}
-                    className="rounded-xl bg-yellow-400 px-3 py-2 text-sm font-bold text-black hover:bg-yellow-300 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    Convert to Order
-                  </button>
-                </div>
+                <StatusCard label="Request Status" status={request.status} />
               </div>
-            );
-          })}
+
+              <div className="mt-5 flex flex-wrap gap-2">
+                <RequestButton
+                  label="pending"
+                  active={request.status === "pending"}
+                  onClick={() => updateRequestStatus(request.id, "pending")}
+                />
+
+                <RequestButton
+                  label="accept"
+                  active={request.status === "accepted"}
+                  onClick={() => updateRequestStatus(request.id, "accepted")}
+                  variant="green"
+                />
+
+                <RequestButton
+                  label="reject"
+                  active={request.status === "rejected"}
+                  onClick={() => updateRequestStatus(request.id, "rejected")}
+                  variant="red"
+                />
+
+                <button
+                  onClick={() => convertRequestToOrder(request)}
+                  disabled={request.status === "converted_to_order"}
+                  className="rounded-xl bg-yellow-400 px-3 py-2 text-sm font-bold text-black hover:bg-yellow-300 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Convert to Order
+                </button>
+              </div>
+            </div>
+          ))}
         </div>
       </Panel>
 
       <AdminProductManager />
-      
+
       <Panel
         title="Users & Credits"
-        subtitle="Search users, update credits, and view each user's boost history."
+        subtitle="Search users, edit usernames, update credits, and view each user's order history."
       >
         <input
           className="mt-5 w-full rounded-xl bg-zinc-800 p-3 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
-          placeholder="Search user by email..."
+          placeholder="Search user by username, email, or role..."
           value={userSearch}
           onChange={(e) => setUserSearch(e.target.value)}
         />
@@ -693,15 +778,39 @@ export default function AdminPage() {
             >
               <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                 <div>
-                  <p className="font-semibold">{profile.email}</p>
+                  <p className="font-semibold">
+                    {profile.username || "No username"}
+                  </p>
                   <p className="mt-1 text-sm text-zinc-400">
+                    {profile.email}
+                  </p>
+                  <p className="mt-1 text-sm text-zinc-500">
                     Role: {profile.role}
                   </p>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-3">
                   <input
-                    className="w-36 rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
+                    className="w-40 rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
+                    placeholder="Username"
+                    value={usernameInputs[profile.id] ?? ""}
+                    onChange={(e) =>
+                      setUsernameInputs((prev) => ({
+                        ...prev,
+                        [profile.id]: e.target.value,
+                      }))
+                    }
+                  />
+
+                  <button
+                    onClick={() => updateUsername(profile.id)}
+                    className="rounded-xl bg-zinc-800 px-4 py-3 text-sm font-semibold hover:bg-zinc-700"
+                  >
+                    Save Name
+                  </button>
+
+                  <input
+                    className="w-32 rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
                     type="number"
                     min="0"
                     step="0.01"
@@ -715,9 +824,9 @@ export default function AdminPage() {
 
                   <button
                     onClick={() => setSelectedProfileId(profile.id)}
-                    className="rounded-xl bg-zinc-800 px-4 py-3 text-sm font-semibold hover:bg-zinc-700"
+                    className="rounded-xl bg-yellow-400 px-4 py-3 text-sm font-bold text-black hover:bg-yellow-300"
                   >
-                    View Profile
+                    View History
                   </button>
                 </div>
               </div>
@@ -728,7 +837,9 @@ export default function AdminPage() {
 
       {selectedProfile && (
         <Panel
-          title={`Profile History: ${selectedProfile.email}`}
+          title={`Profile History: ${
+            selectedProfile.username || selectedProfile.email
+          }`}
           subtitle="Admin view of this user's active, completed, rejected, and archived orders."
         >
           <button
@@ -747,16 +858,17 @@ export default function AdminPage() {
               <OrderCard
                 key={order.id}
                 order={order}
-                userEmail={selectedProfile.email || order.user_id}
+                userLabel={getUserLabel(order.user_id)}
                 messages={messages}
                 currentUserId={currentUserId}
                 chatInputs={chatInputs}
                 setChatInputs={setChatInputs}
                 sendAdminMessage={sendAdminMessage}
                 updateStatus={updateStatus}
+                updateOrderDetails={updateOrderDetails}
+                deleteOrder={deleteOrder}
                 archiveCompletedOrder={archiveCompletedOrder}
                 restoreArchivedOrder={restoreArchivedOrder}
-                deleteRejectedOrder={deleteRejectedOrder}
                 formatDate={formatDate}
                 showArchiveControls
               />
@@ -767,12 +879,12 @@ export default function AdminPage() {
 
       <Panel
         title="Active Orders"
-        subtitle="Search, filter, update status, chat, archive completed orders, and delete rejected orders."
+        subtitle="Search, filter, edit, delete, update status, chat, and archive completed orders."
       >
         <div className="mt-5 grid gap-4 md:grid-cols-2">
           <input
             className="rounded-xl bg-zinc-800 p-3 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
-            placeholder="Search orders by user, service, rank, or notes..."
+            placeholder="Search orders by username, email, service, rank, notes, or status..."
             value={orderSearch}
             onChange={(e) => setOrderSearch(e.target.value)}
           />
@@ -797,28 +909,25 @@ export default function AdminPage() {
             <EmptyState text="No matching active orders found." />
           )}
 
-          {filteredOrders.map((order) => {
-            const user = profiles.find((p) => p.id === order.user_id);
-
-            return (
-              <OrderCard
-                key={order.id}
-                order={order}
-                userEmail={user?.email || order.user_id}
-                messages={messages}
-                currentUserId={currentUserId}
-                chatInputs={chatInputs}
-                setChatInputs={setChatInputs}
-                sendAdminMessage={sendAdminMessage}
-                updateStatus={updateStatus}
-                archiveCompletedOrder={archiveCompletedOrder}
-                restoreArchivedOrder={restoreArchivedOrder}
-                deleteRejectedOrder={deleteRejectedOrder}
-                formatDate={formatDate}
-                showArchiveControls
-              />
-            );
-          })}
+          {filteredOrders.map((order) => (
+            <OrderCard
+              key={order.id}
+              order={order}
+              userLabel={getUserLabel(order.user_id)}
+              messages={messages}
+              currentUserId={currentUserId}
+              chatInputs={chatInputs}
+              setChatInputs={setChatInputs}
+              sendAdminMessage={sendAdminMessage}
+              updateStatus={updateStatus}
+              updateOrderDetails={updateOrderDetails}
+              deleteOrder={deleteOrder}
+              archiveCompletedOrder={archiveCompletedOrder}
+              restoreArchivedOrder={restoreArchivedOrder}
+              formatDate={formatDate}
+              showArchiveControls
+            />
+          ))}
         </div>
       </Panel>
     </PageShell>
@@ -935,61 +1044,75 @@ function DateGrid({
 }) {
   return (
     <div className="mt-4 grid gap-3 text-sm text-zinc-400 md:grid-cols-3">
-      <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-3">
-        <p className="text-xs text-zinc-500">Created</p>
-        <p className="mt-1">{formatDate(createdAt)}</p>
-      </div>
+      <DateBox label="Created" value={formatDate(createdAt)} />
+      <DateBox label="Last Updated" value={formatDate(updatedAt)} />
+      <DateBox label="Completed" value={formatDate(completedAt)} />
+    </div>
+  );
+}
 
-      <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-3">
-        <p className="text-xs text-zinc-500">Last Updated</p>
-        <p className="mt-1">{formatDate(updatedAt)}</p>
-      </div>
-
-      <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-3">
-        <p className="text-xs text-zinc-500">Completed</p>
-        <p className="mt-1">{formatDate(completedAt)}</p>
-      </div>
+function DateBox({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-3">
+      <p className="text-xs text-zinc-500">{label}</p>
+      <p className="mt-1">{value}</p>
     </div>
   );
 }
 
 function OrderCard({
   order,
-  userEmail,
+  userLabel,
   messages,
   currentUserId,
   chatInputs,
   setChatInputs,
   sendAdminMessage,
   updateStatus,
+  updateOrderDetails,
+  deleteOrder,
   archiveCompletedOrder,
   restoreArchivedOrder,
-  deleteRejectedOrder,
   formatDate,
   showArchiveControls,
 }: {
   order: Order;
-  userEmail: string;
+  userLabel: string;
   messages: Message[];
   currentUserId: string;
   chatInputs: Record<string, string>;
   setChatInputs: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   sendAdminMessage: (orderId: string) => Promise<void>;
   updateStatus: (orderId: string, status: string) => Promise<void>;
+  updateOrderDetails: (orderId: string, data: OrderEditData) => Promise<void>;
+  deleteOrder: (order: Order) => Promise<void>;
   archiveCompletedOrder: (orderId: string) => Promise<void>;
   restoreArchivedOrder: (orderId: string) => Promise<void>;
-  deleteRejectedOrder: (orderId: string) => Promise<void>;
   formatDate: (date: string | null) => string;
   showArchiveControls?: boolean;
 }) {
+  const [editing, setEditing] = useState(false);
+  const [editData, setEditData] = useState<OrderEditData>({
+    service_type: order.service_type,
+    current_rank: order.current_rank ?? "",
+    target_rank: order.target_rank ?? "",
+    notes: order.notes ?? "",
+    status: order.status,
+  });
+
   const orderMessages = messages.filter(
     (message) => message.order_id === order.id
   );
 
+  async function saveEdit() {
+    await updateOrderDetails(order.id, editData);
+    setEditing(false);
+  }
+
   return (
     <div className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-5">
       <div className="flex flex-col justify-between gap-5 md:flex-row md:items-start">
-        <div>
+        <div className="w-full">
           <div className="flex flex-wrap items-center gap-3">
             <p className="text-lg font-bold">{order.service_type}</p>
             <StatusBadge status={order.status} />
@@ -1001,7 +1124,7 @@ function OrderCard({
             )}
           </div>
 
-          <p className="mt-2 text-sm text-zinc-400">User: {userEmail}</p>
+          <p className="mt-2 text-sm text-zinc-400">User: {userLabel}</p>
 
           <p className="text-sm text-zinc-400">
             {order.current_rank || "N/A"} → {order.target_rank || "N/A"}
@@ -1021,6 +1144,96 @@ function OrderCard({
 
         <StatusCard label="Current Status" status={order.status} />
       </div>
+
+      {editing && (
+        <div className="mt-5 rounded-2xl border border-yellow-400/30 bg-yellow-400/10 p-5">
+          <h4 className="font-bold text-yellow-300">Edit Order</h4>
+
+          <div className="mt-4 grid gap-4 md:grid-cols-2">
+            <input
+              className="rounded-xl bg-zinc-900 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
+              placeholder="Service type"
+              value={editData.service_type}
+              onChange={(e) =>
+                setEditData((prev) => ({
+                  ...prev,
+                  service_type: e.target.value,
+                }))
+              }
+            />
+
+            <select
+              className="rounded-xl bg-zinc-900 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
+              value={editData.status}
+              onChange={(e) =>
+                setEditData((prev) => ({
+                  ...prev,
+                  status: e.target.value,
+                }))
+              }
+            >
+              <option value="pending">Pending</option>
+              <option value="accepted">Accepted</option>
+              <option value="rejected">Rejected</option>
+              <option value="in_progress">In Progress</option>
+              <option value="completed">Completed</option>
+              <option value="cancelled">Cancelled</option>
+            </select>
+
+            <input
+              className="rounded-xl bg-zinc-900 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
+              placeholder="Current value"
+              value={editData.current_rank}
+              onChange={(e) =>
+                setEditData((prev) => ({
+                  ...prev,
+                  current_rank: e.target.value,
+                }))
+              }
+            />
+
+            <input
+              className="rounded-xl bg-zinc-900 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
+              placeholder="Target value"
+              value={editData.target_rank}
+              onChange={(e) =>
+                setEditData((prev) => ({
+                  ...prev,
+                  target_rank: e.target.value,
+                }))
+              }
+            />
+
+            <textarea
+              className="min-h-24 rounded-xl bg-zinc-900 p-3 outline-none focus:ring-2 focus:ring-yellow-400 md:col-span-2"
+              placeholder="Notes"
+              value={editData.notes}
+              onChange={(e) =>
+                setEditData((prev) => ({
+                  ...prev,
+                  notes: e.target.value,
+                }))
+              }
+            />
+          </div>
+
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button
+              onClick={saveEdit}
+              className="rounded-xl bg-yellow-400 px-4 py-2 text-sm font-bold text-black hover:bg-yellow-300"
+            >
+              Save Order
+            </button>
+
+            <button
+              onClick={() => setEditing(false)}
+              className="rounded-xl bg-zinc-800 px-4 py-2 text-sm hover:bg-zinc-700"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="mt-5 flex flex-wrap gap-2">
         {[
@@ -1044,6 +1257,20 @@ function OrderCard({
           </button>
         ))}
 
+        <button
+          onClick={() => setEditing((prev) => !prev)}
+          className="rounded-xl bg-blue-500 px-3 py-2 text-sm font-bold text-white hover:bg-blue-400"
+        >
+          {editing ? "Close Edit" : "Edit Order"}
+        </button>
+
+        <button
+          onClick={() => deleteOrder(order)}
+          className="rounded-xl bg-red-700 px-3 py-2 text-sm font-bold text-white hover:bg-red-600"
+        >
+          Delete Order
+        </button>
+
         {showArchiveControls &&
           order.status === "completed" &&
           !order.admin_archived && (
@@ -1061,15 +1288,6 @@ function OrderCard({
             className="rounded-xl bg-blue-500 px-3 py-2 text-sm font-bold text-white hover:bg-blue-400"
           >
             Restore to Active
-          </button>
-        )}
-
-        {showArchiveControls && order.status === "rejected" && (
-          <button
-            onClick={() => deleteRejectedOrder(order.id)}
-            className="rounded-xl bg-red-700 px-3 py-2 text-sm font-bold text-white hover:bg-red-600"
-          >
-            Delete Rejected
           </button>
         )}
       </div>
