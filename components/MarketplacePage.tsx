@@ -92,6 +92,10 @@ const addListingLabels: Record<ProductCategory, string> = {
 
 const marketTypes = ["All", "In-game Items", "Finger Sleeves", "Keychains"];
 
+function productManagerHref(category: ProductCategory) {
+  return `/admin/products?category=${category}`;
+}
+
 function buildWhatsAppUrl(product: Product) {
   const phone = process.env.NEXT_PUBLIC_WHATSAPP_NUMBER || "65YOURNUMBER";
 
@@ -213,9 +217,9 @@ export default function MarketplacePage({
 
     if (profile?.role === "admin") {
       alert(
-        "Admins manage listings from the admin panel. Admins cannot submit purchase requests."
+        "Admins manage listings from the Product Manager. Admins cannot submit purchase requests."
       );
-      router.push("/admin#product-manager");
+      router.push(productManagerHref(category));
       return;
     }
 
@@ -336,17 +340,26 @@ export default function MarketplacePage({
             </Link>
 
             {isAdmin && (
-              <Link href="/admin" className="text-yellow-300 hover:text-white">
-                Admin
-              </Link>
+              <>
+                <Link href="/admin" className="text-zinc-300 hover:text-white">
+                  Orders Admin
+                </Link>
+
+                <Link
+                  href="/admin/products"
+                  className="text-yellow-300 hover:text-white"
+                >
+                  Product Manager
+                </Link>
+              </>
             )}
           </div>
 
           <Link
-            href={isAdmin ? "/admin" : "/dashboard"}
+            href={isAdmin ? "/admin/products" : "/dashboard"}
             className="rounded-xl bg-yellow-400 px-4 py-2 text-sm font-bold text-black hover:bg-yellow-300"
           >
-            {isAdmin ? "Admin Panel" : "My Dashboard"}
+            {isAdmin ? "Product Manager" : "My Dashboard"}
           </Link>
         </div>
       </nav>
@@ -473,8 +486,8 @@ export default function MarketplacePage({
 
                 {isAdmin && (
                   <div className="mt-4 rounded-2xl border border-yellow-400/40 bg-yellow-400/10 p-4 text-sm text-yellow-200">
-                    Admin mode: requests are disabled. Use the admin panel to
-                    add, edit, hide, or delete listings.
+                    Admin mode: requests are disabled here. Use Product Manager
+                    to add, edit, hide, or delete listings.
                   </div>
                 )}
               </div>
@@ -482,7 +495,7 @@ export default function MarketplacePage({
               <div className="flex flex-col gap-3 sm:flex-row">
                 {isAdmin && (
                   <Link
-                    href="/admin#product-manager"
+                    href={productManagerHref(category)}
                     className="rounded-xl bg-yellow-400 px-5 py-3 text-center text-sm font-bold text-black hover:bg-yellow-300"
                   >
                     {addListingLabels[category]}
@@ -549,7 +562,7 @@ export default function MarketplacePage({
 
                   {isAdmin && (
                     <Link
-                      href="/admin#product-manager"
+                      href={productManagerHref(category)}
                       className="mt-4 inline-flex rounded-xl bg-yellow-400 px-5 py-3 text-sm font-bold text-black hover:bg-yellow-300"
                     >
                       {addListingLabels[category]}
@@ -651,14 +664,14 @@ function ProductCard({
           {isAdmin ? (
             <div className="flex flex-col gap-2">
               <Link
-                href="/admin#product-manager"
+                href={productManagerHref(category)}
                 className="rounded-xl bg-zinc-800 px-4 py-2 text-center text-sm font-bold text-white hover:bg-zinc-700"
               >
                 Manage
               </Link>
 
               <Link
-                href="/admin#product-manager"
+                href={productManagerHref(category)}
                 className="rounded-xl bg-yellow-400 px-4 py-2 text-center text-sm font-bold text-black hover:bg-yellow-300"
               >
                 Add
