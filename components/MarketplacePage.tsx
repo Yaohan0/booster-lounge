@@ -82,6 +82,8 @@ export default function MarketplacePage({
   const router = useRouter();
 
   const [products, setProducts] = useState<Product[]>([]);
+  const [isAdmin, setIsAdmin] = useState(false);
+
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState("recommended");
   const [loading, setLoading] = useState(true);
@@ -91,8 +93,24 @@ export default function MarketplacePage({
   const [quickPrice, setQuickPrice] = useState("");
 
   useEffect(() => {
-    async function loadProducts() {
+    async function loadMarketplace() {
       setLoading(true);
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (user) {
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("role")
+          .eq("id", user.id)
+          .single();
+
+        setIsAdmin(profile?.role === "admin");
+      } else {
+        setIsAdmin(false);
+      }
 
       const { data, error } = await supabase
         .from("products")
@@ -111,7 +129,7 @@ export default function MarketplacePage({
       setLoading(false);
     }
 
-    loadProducts();
+    loadMarketplace();
   }, [category, supabase]);
 
   function matchesPrice(product: Product) {
@@ -141,6 +159,18 @@ export default function MarketplacePage({
       return;
     }
 
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .single();
+
+    if (profile?.role === "admin") {
+      alert("Admins manage listings from the admin panel. Admins cannot submit purchase requests.");
+      router.push("/admin");
+      return;
+    }
+
     const notes = [
       `Product Request: ${product.title}`,
       `Category: ${category}`,
@@ -148,7 +178,6 @@ export default function MarketplacePage({
       `Delivery: ${product.delivery_time || "Manual review"}`,
       `Image URL: ${product.image_url || "N/A"}`,
       `Video URL: ${product.video_url || "N/A"}`,
-      `Rank Icon URL: ${product.rank_icon_url || "N/A"}`,
       "",
       "Description:",
       product.description || "N/A",
@@ -244,13 +273,19 @@ export default function MarketplacePage({
             <Link href="/dashboard" className="hover:text-white">
               Dashboard
             </Link>
+
+            {isAdmin && (
+              <Link href="/admin" className="text-yellow-300 hover:text-white">
+                Admin
+              </Link>
+            )}
           </div>
 
           <Link
-            href="/dashboard"
+            href={isAdmin ? "/admin" : "/dashboard"}
             className="rounded-xl bg-yellow-400 px-4 py-2 text-sm font-bold text-black hover:bg-yellow-300"
           >
-            My Dashboard
+            {isAdmin ? "Admin Panel" : "My Dashboard"}
           </Link>
         </div>
       </nav>
@@ -293,16 +328,19 @@ export default function MarketplacePage({
                   active={quickPrice === "0-70"}
                   onClick={() => setQuickPrice("0-70")}
                 />
+
                 <FilterButton
                   text="SGD70 - SGD200"
                   active={quickPrice === "70-200"}
                   onClick={() => setQuickPrice("70-200")}
                 />
+
                 <FilterButton
                   text="SGD200 - SGD400"
                   active={quickPrice === "200-400"}
                   onClick={() => setQuickPrice("200-400")}
                 />
+
                 <FilterButton
                   text="SGD400+"
                   active={quickPrice === "400+"}
@@ -320,11 +358,13 @@ export default function MarketplacePage({
                   active={search === "Manual review"}
                   onClick={() => setSearch("Manual review")}
                 />
+
                 <FilterButton
                   text="Instant after approval"
                   active={search === "Instant after approval"}
                   onClick={() => setSearch("Instant after approval")}
                 />
+
                 <FilterButton
                   text="1 day"
                   active={search === "1 day"}
@@ -376,6 +416,13 @@ export default function MarketplacePage({
               <div>
                 <h1 className="text-4xl font-bold">{title}</h1>
                 <p className="mt-3 max-w-2xl text-zinc-400">{subtitle}</p>
+
+                {isAdmin && (
+                  <div className="mt-4 rounded-2xl border border-yellow-400/40 bg-yellow-400/10 p-4 text-sm text-yellow-200">
+                    Admin mode: marketplace requests are disabled. Use the admin panel to add,
+                    edit, hide, or delete listings.
+                  </div>
+                )}
               </div>
 
               <select
@@ -426,6 +473,7 @@ export default function MarketplacePage({
                   key={product.id}
                   product={product}
                   category={category}
+                  isAdmin={isAdmin}
                   onRequest={() => requestProduct(product)}
                 />
               ))}
@@ -446,10 +494,12 @@ export default function MarketplacePage({
 function ProductCard({
   product,
   category,
+  isAdmin,
   onRequest,
 }: {
   product: Product;
   category: ProductCategory;
+  isAdmin: boolean;
   onRequest: () => void;
 }) {
   return (
@@ -474,10 +524,10 @@ function ProductCard({
           </div>
         )}
 
-        {product.rank_icon_url && (
+        {category !== "accounts" && product.rank_icon_url && (
           <img
             src={product.rank_icon_url}
-            alt="Rank icon"
+            alt="Icon"
             className="absolute bottom-3 left-3 h-12 w-12 rounded-xl border border-zinc-700 bg-zinc-950 object-cover p-1"
           />
         )}
@@ -519,12 +569,21 @@ function ProductCard({
             </p>
           </div>
 
-          <button
-            onClick={onRequest}
-            className="rounded-xl bg-yellow-400 px-4 py-2 text-sm font-bold text-black hover:bg-yellow-300"
-          >
-            Request
-          </button>
+          {isAdmin ? (
+            <Link
+              href="/admin"
+              className="rounded-xl bg-zinc-800 px-4 py-2 text-sm font-bold text-white hover:bg-zinc-700"
+            >
+              Manage
+            </Link>
+          ) : (
+            <button
+              onClick={onRequest}
+              className="rounded-xl bg-yellow-400 px-4 py-2 text-sm font-bold text-black hover:bg-yellow-300"
+            >
+              Request
+            </button>
+          )}
         </div>
       </div>
     </div>

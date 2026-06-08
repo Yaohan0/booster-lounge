@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
 
@@ -13,6 +13,50 @@ type ServiceType =
   | "Custom Request";
 
 type OrderMode = "Boost" | "Carry";
+
+type Brawler = {
+  id: number;
+  name: string;
+  power: number;
+  rank: number;
+  trophies: number;
+  highestTrophies: number;
+  prestigeLevel?: number;
+  currentWinStreak?: number;
+  maxWinStreak?: number;
+  skin?: {
+    id: number;
+    name: string;
+  };
+  gadgets?: {
+    id: number;
+    name: string;
+  }[];
+  gears?: {
+    id: number;
+    name: string;
+    level: number;
+  }[];
+  starPowers?: {
+    id: number;
+    name: string;
+  }[];
+  hyperCharges?: {
+    id: number;
+    name: string;
+  }[];
+};
+
+type VerifiedPlayer = {
+  tag: string;
+  name: string;
+  trophies: number;
+  highestTrophies: number;
+  expLevel: number;
+  club: string | null;
+  iconId: number | null;
+  brawlers: Brawler[];
+};
 
 const serviceTabs: ServiceType[] = [
   "Rank Boost",
@@ -45,7 +89,6 @@ const allRanks = [
 ];
 
 const prestigeOptions = ["Prestige 1", "Prestige 2", "Prestige 3"];
-
 const coachingDurations = ["15 mins", "30 mins", "1 hour"];
 
 const rankIcons: Record<string, string> = {
@@ -70,30 +113,35 @@ const rankIcons: Record<string, string> = {
   "Masters III": "🏆",
 };
 
+function formatNumber(value: number) {
+  return new Intl.NumberFormat("en-SG").format(value);
+}
+
 function getHigherRanks(currentRank: string) {
   const currentIndex = allRanks.indexOf(currentRank);
 
-  if (currentIndex === -1) {
-    return allRanks;
-  }
+  if (currentIndex === -1) return allRanks;
 
   const higherRanks = allRanks.slice(currentIndex + 1);
 
-  if (higherRanks.length === 0) {
-    return [currentRank];
-  }
+  if (higherRanks.length === 0) return [currentRank];
 
   return higherRanks;
 }
 
-function getDefaultTargetRank(currentRank: string) {
-  const higherRanks = getHigherRanks(currentRank);
-  return higherRanks[0] ?? currentRank;
+function normalizeTag(tag: string) {
+  const clean = tag.trim().toUpperCase();
+
+  if (!clean) return "";
+
+  return clean.startsWith("#") ? clean : `#${clean}`;
 }
 
 export default function ServicesPage() {
   const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
+
+  const [isAdmin, setIsAdmin] = useState(false);
 
   const [serviceType, setServiceType] = useState<ServiceType>("Rank Boost");
   const [orderMode, setOrderMode] = useState<OrderMode>("Boost");
@@ -113,12 +161,44 @@ export default function ServicesPage() {
   const [coachingDuration, setCoachingDuration] = useState("30 mins");
 
   const [tag, setTag] = useState("");
-  const [notes, setNotes] = useState("");
+  const [verifiedPlayer, setVerifiedPlayer] = useState<VerifiedPlayer | null>(
+    null
+  );
+  const [verifyingTag, setVerifyingTag] = useState(false);
 
+  const [notes, setNotes] = useState("");
   const [express, setExpress] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const availableTargetRanks = getHigherRanks(currentRank);
+
+  useEffect(() => {
+    async function checkAdmin() {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        setIsAdmin(false);
+        return;
+      }
+
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", user.id)
+        .single();
+
+      setIsAdmin(profile?.role === "admin");
+    }
+
+    checkAdmin();
+  }, [supabase]);
+
+  function updateTag(value: string) {
+    setTag(value);
+    setVerifiedPlayer(null);
+  }
 
   function changeCurrentRank(nextRank: string) {
     setCurrentRank(nextRank);
@@ -138,6 +218,7 @@ export default function ServicesPage() {
     setExpress(false);
     setNotes("");
     setTag("");
+    setVerifiedPlayer(null);
 
     if (tab === "Rank Boost") {
       setCurrentRank("Bronze I");
@@ -191,37 +272,183 @@ export default function ServicesPage() {
       `Service: ${serviceType}`,
       `Type: ${orderMode}`,
       `Express: ${express ? "Yes" : "No"}`,
-      `Tag: ${tag || "Not provided"}`,
+      `Tag: ${normalizeTag(tag) || "Not provided"}`,
     ];
 
+    if (verifiedPlayer) {
+      lines.push("");
+      lines.push("Verified Brawl Stars Account:");
+      lines.push(`Player Name: ${verifiedPlayer.name}`);
+      lines.push(`Verified Tag: ${verifiedPlayer.tag}`);
+      lines.push(`Trophies: ${verifiedPlayer.trophies}`);
+      lines.push(`Highest Trophies: ${verifiedPlayer.highestTrophies}`);
+      lines.push(`EXP Level: ${verifiedPlayer.expLevel}`);
+      lines.push(`Club: ${verifiedPlayer.club || "No club"}`);
+      lines.push(`Icon ID: ${verifiedPlayer.iconId ?? "N/A"}`);
+      lines.push(`Total Brawlers: ${verifiedPlayer.brawlers?.length ?? 0}`);
+    }
+
     if (serviceType === "Rank Boost") {
+      lines.push("");
       lines.push(`Current Rank: ${currentRank}`);
       lines.push(`Target Rank: ${targetRank}`);
     }
 
     if (serviceType === "Trophy Boost") {
-      lines.push(`Current Trophies: ${currentTrophies || "Not provided"}`);
-      lines.push(`Target Trophies: ${targetTrophies || "Not provided"}`);
-      lines.push(`Total Trophies: ${totalTrophies || "Not provided"}`);
-      lines.push(`Brawler: ${brawler || "Not provided"}`);
+      lines.push("");
+      lines.push(`Current Trophies: ${currentTrophies}`);
+      lines.push(`Target Trophies: ${targetTrophies}`);
+      lines.push(`Total Trophies: ${totalTrophies}`);
+      lines.push(`Brawler: ${brawler}`);
     }
 
     if (serviceType === "Prestige Icon") {
+      lines.push("");
       lines.push(`Prestige Target: ${prestigeTarget}`);
-      lines.push(`Brawler: ${brawler || "Not provided"}`);
-      lines.push(`Brawler Trophies: ${brawlerTrophies || "Not provided"}`);
+      lines.push(`Brawler: ${brawler}`);
+      lines.push(`Brawler Trophies: ${brawlerTrophies}`);
     }
 
     if (serviceType === "Coaching") {
-      lines.push(`Areas to Work On: ${coachingFocus || "Not provided"}`);
+      lines.push("");
+      lines.push(`Areas to Work On: ${coachingFocus}`);
       lines.push(`Duration: ${coachingDuration}`);
     }
 
     return lines.join("\n");
   }
 
+  function validateRequest() {
+    if (isAdmin) {
+      alert(
+        "Admins cannot submit customer requests. Use the admin panel to assign, edit, or delete orders."
+      );
+      return false;
+    }
+
+    const cleanTag = normalizeTag(tag);
+
+    if (!cleanTag) {
+      alert("Player tag is required.");
+      return false;
+    }
+
+    if (!cleanTag.startsWith("#")) {
+      alert("Player tag must start with #.");
+      return false;
+    }
+
+    if (!verifiedPlayer) {
+      alert("Please verify your Brawl Stars player tag before submitting.");
+      return false;
+    }
+
+    if (normalizeTag(verifiedPlayer.tag) !== cleanTag) {
+      alert("Your tag changed after verification. Please verify it again.");
+      return false;
+    }
+
+    if (serviceType === "Rank Boost") {
+      if (!currentRank || !targetRank) {
+        alert("Current rank and target rank are required.");
+        return false;
+      }
+
+      const currentIndex = allRanks.indexOf(currentRank);
+      const targetIndex = allRanks.indexOf(targetRank);
+
+      if (targetIndex <= currentIndex) {
+        alert("Target rank must be above your current rank.");
+        return false;
+      }
+    }
+
+    if (serviceType === "Trophy Boost") {
+      if (
+        !currentTrophies.trim() ||
+        !targetTrophies.trim() ||
+        !totalTrophies.trim() ||
+        !brawler.trim()
+      ) {
+        alert(
+          "Current trophies, target trophies, total trophies, and brawler are required."
+        );
+        return false;
+      }
+    }
+
+    if (serviceType === "Prestige Icon") {
+      if (!prestigeTarget || !brawler.trim() || !brawlerTrophies.trim()) {
+        alert("Prestige, brawler, and brawler trophies are required.");
+        return false;
+      }
+    }
+
+    if (serviceType === "Coaching") {
+      if (!coachingFocus.trim() || !coachingDuration) {
+        alert("Areas to work on and coaching duration are required.");
+        return false;
+      }
+    }
+
+    if (serviceType === "Custom Request") {
+      if (!notes.trim()) {
+        alert("Custom request details are required.");
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  async function verifyPlayerTag() {
+    const cleanTag = normalizeTag(tag);
+
+    if (!cleanTag) {
+      alert("Enter your player tag first.");
+      return;
+    }
+
+    setVerifyingTag(true);
+    setVerifiedPlayer(null);
+
+    try {
+      const response = await fetch(
+        `/api/brawl-player?tag=${encodeURIComponent(cleanTag)}`
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        alert(data.error || "Unable to verify player tag.");
+        return;
+      }
+
+      setVerifiedPlayer({
+        tag: data.tag,
+        name: data.name,
+        trophies: Number(data.trophies ?? 0),
+        highestTrophies: Number(data.highestTrophies ?? 0),
+        expLevel: Number(data.expLevel ?? 0),
+        club: data.club ?? null,
+        iconId: data.iconId ?? null,
+        brawlers: data.brawlers ?? [],
+      });
+
+      setTag(data.tag || cleanTag);
+    } catch (error) {
+      console.error(error);
+      alert("Server error while verifying player tag.");
+    } finally {
+      setVerifyingTag(false);
+    }
+  }
+
   async function submitRequest(e: React.FormEvent) {
     e.preventDefault();
+
+    if (!validateRequest()) return;
+
     setLoading(true);
 
     const {
@@ -230,6 +457,19 @@ export default function ServicesPage() {
 
     if (!user) {
       router.push("/login");
+      return;
+    }
+
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .single();
+
+    if (profile?.role === "admin") {
+      setLoading(false);
+      alert("Admins cannot submit customer requests. Use the admin panel instead.");
+      router.push("/admin");
       return;
     }
 
@@ -277,13 +517,18 @@ export default function ServicesPage() {
             <Link href="/dashboard" className="hover:text-white">
               Dashboard
             </Link>
+            {isAdmin && (
+              <Link href="/admin" className="text-yellow-300 hover:text-white">
+                Admin
+              </Link>
+            )}
           </div>
 
           <Link
-            href="/dashboard"
+            href={isAdmin ? "/admin" : "/dashboard"}
             className="rounded-xl bg-yellow-400 px-4 py-2 text-sm font-bold text-black hover:bg-yellow-300"
           >
-            My Dashboard
+            {isAdmin ? "Admin Panel" : "My Dashboard"}
           </Link>
         </div>
       </nav>
@@ -299,13 +544,21 @@ export default function ServicesPage() {
               </p>
 
               <h1 className="mt-4 max-w-3xl text-4xl font-bold tracking-tight md:text-6xl">
-                Build your request and let admin review it.
+                Build your request and verify your account tag.
               </h1>
 
               <p className="mt-5 max-w-2xl text-zinc-400">
-                Choose your service, boost type, target details, and tag. Your
-                request will be reviewed before becoming an active order.
+                Choose your service, boost type, target details, and Brawl Stars
+                tag. Your request will be reviewed before becoming an active
+                order.
               </p>
+
+              {isAdmin && (
+                <div className="mt-5 rounded-2xl border border-yellow-400/40 bg-yellow-400/10 p-4 text-sm text-yellow-200">
+                  Admin mode: customer requests are disabled. Use the admin
+                  panel to assign, edit, or delete orders.
+                </div>
+              )}
             </div>
 
             <div className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-5">
@@ -336,7 +589,7 @@ export default function ServicesPage() {
 
           <form
             onSubmit={submitRequest}
-            className="mt-8 grid gap-8 lg:grid-cols-[1fr_420px]"
+            className="mt-8 grid gap-8 lg:grid-cols-[1fr_430px]"
           >
             <div className="grid gap-6">
               <ServiceForm
@@ -379,12 +632,14 @@ export default function ServicesPage() {
                 />
               </div>
 
+              {verifiedPlayer && <PlayerPreviewCard player={verifiedPlayer} />}
+
               <TrustPanel />
             </div>
 
             <aside className="h-fit rounded-3xl border border-yellow-400/70 bg-zinc-950 p-6 shadow-2xl shadow-yellow-400/10">
               <div className="rounded-2xl bg-gradient-to-br from-blue-400 to-yellow-200 p-5 text-black">
-                <p className="text-sm font-bold">CUSTOMIZE ORDER</p>
+                <p className="text-sm font-bold">CUSTOMIZE REQUEST</p>
                 <h2 className="mt-2 text-2xl font-black">{serviceType}</h2>
               </div>
 
@@ -439,6 +694,7 @@ export default function ServicesPage() {
                         onChange={setTotalTrophies}
                         placeholder="e.g. 45000"
                       />
+
                       <TextField
                         label="Brawler"
                         value={brawler}
@@ -456,12 +712,14 @@ export default function ServicesPage() {
                         onChange={setPrestigeTarget}
                         options={prestigeOptions}
                       />
+
                       <TextField
                         label="Brawler"
                         value={brawler}
                         onChange={setBrawler}
                         placeholder="e.g. Edgar"
                       />
+
                       <TextField
                         label="Brawler Trophies"
                         value={brawlerTrophies}
@@ -489,12 +747,37 @@ export default function ServicesPage() {
                     </>
                   )}
 
-                  <TextField
-                    label="Tag"
-                    value={tag}
-                    onChange={setTag}
-                    placeholder="#"
-                  />
+                  <div className="grid gap-2">
+                    <span className="text-sm font-semibold text-zinc-200">
+                      Player Tag
+                    </span>
+
+                    <input
+                      className="rounded-xl bg-zinc-800 p-3 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
+                      value={tag}
+                      onChange={(e) => updateTag(e.target.value)}
+                      placeholder="#PLAYER_TAG"
+                    />
+
+                    <button
+                      type="button"
+                      onClick={verifyPlayerTag}
+                      disabled={verifyingTag}
+                      className="rounded-xl border border-yellow-400/50 px-4 py-3 text-sm font-bold text-yellow-300 hover:bg-yellow-400/10 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {verifyingTag ? "Verifying..." : "Verify Player Tag"}
+                    </button>
+                  </div>
+
+                  {verifiedPlayer && (
+                    <div className="rounded-2xl border border-green-400/30 bg-green-400/10 p-4 text-sm text-green-300">
+                      <p className="font-bold">Verified Account</p>
+                      <p className="mt-1">{verifiedPlayer.name}</p>
+                      <p className="text-xs text-green-200">
+                        {verifiedPlayer.tag}
+                      </p>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -507,7 +790,11 @@ export default function ServicesPage() {
                   <SummaryRow label="Current" value={getCurrentValue()} />
                   <SummaryRow label="Target" value={getTargetValue()} />
                   <SummaryRow label="Express" value={express ? "Yes" : "No"} />
-                  <SummaryRow label="Tag" value={tag || "#"} />
+                  <SummaryRow label="Tag" value={normalizeTag(tag) || "#"} />
+                  <SummaryRow
+                    label="Verified"
+                    value={verifiedPlayer ? "Yes" : "No"}
+                  />
                 </div>
 
                 <div className="mt-5 rounded-xl bg-yellow-400/10 p-4 text-sm text-yellow-200">
@@ -516,10 +803,14 @@ export default function ServicesPage() {
               </div>
 
               <button
-                disabled={loading}
+                disabled={loading || isAdmin}
                 className="mt-5 w-full rounded-xl bg-yellow-400 p-4 font-bold text-black hover:bg-yellow-300 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {loading ? "Submitting..." : "Submit request"}
+                {isAdmin
+                  ? "Admin Cannot Submit Requests"
+                  : loading
+                    ? "Submitting..."
+                    : "Submit request"}
               </button>
 
               <p className="mt-4 text-center text-xs text-zinc-500">
@@ -705,6 +996,7 @@ function RankCard({
       </div>
 
       <label className="text-sm font-semibold text-zinc-300">{title}</label>
+
       <select
         className="mt-2 w-full rounded-xl bg-zinc-800 p-4 outline-none focus:ring-2 focus:ring-yellow-400"
         value={value}
@@ -722,6 +1014,180 @@ function RankIcon({ rank }: { rank: string }) {
   return (
     <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-yellow-400/30 bg-zinc-900 text-3xl shadow-lg shadow-yellow-400/10">
       {rankIcons[rank] || "🏆"}
+    </div>
+  );
+}
+
+function PlayerPreviewCard({ player }: { player: VerifiedPlayer }) {
+  const brawlers = player.brawlers ?? [];
+
+  const totalBrawlers = brawlers.length;
+  const power11Count = brawlers.filter((brawler) => brawler.power >= 11).length;
+
+  const gadgetCount = brawlers.reduce(
+    (total, brawler) => total + (brawler.gadgets?.length ?? 0),
+    0
+  );
+
+  const starPowerCount = brawlers.reduce(
+    (total, brawler) => total + (brawler.starPowers?.length ?? 0),
+    0
+  );
+
+  const gearCount = brawlers.reduce(
+    (total, brawler) => total + (brawler.gears?.length ?? 0),
+    0
+  );
+
+  const hyperChargeCount = brawlers.reduce(
+    (total, brawler) => total + (brawler.hyperCharges?.length ?? 0),
+    0
+  );
+
+  const prestigeCount = brawlers.filter(
+    (brawler) => Number(brawler.prestigeLevel ?? 0) > 0
+  ).length;
+
+  const topBrawlers = [...brawlers]
+    .sort((a, b) => b.trophies - a.trophies)
+    .slice(0, 8);
+
+  const maxedPercent =
+    totalBrawlers > 0 ? Math.round((power11Count / totalBrawlers) * 100) : 0;
+
+  return (
+    <div className="overflow-hidden rounded-3xl border border-green-400/30 bg-zinc-950 shadow-2xl shadow-green-400/10">
+      <div className="bg-gradient-to-br from-green-300 via-yellow-200 to-blue-300 p-6 text-black">
+        <div className="flex flex-col justify-between gap-5 md:flex-row md:items-end">
+          <div>
+            <p className="text-sm font-black uppercase tracking-wide">
+              Verified Brawl Stars Account
+            </p>
+
+            <h2 className="mt-2 text-4xl font-black">{player.name}</h2>
+
+            <p className="mt-1 font-bold">{player.tag}</p>
+          </div>
+
+          <div className="rounded-2xl bg-black/10 px-5 py-3 text-right">
+            <p className="text-sm font-bold">Trophies</p>
+            <p className="text-3xl font-black">
+              {formatNumber(player.trophies)}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-5 p-6">
+        <div className="grid gap-4 md:grid-cols-4">
+          <StatBox
+            label="Highest Trophies"
+            value={formatNumber(player.highestTrophies)}
+          />
+
+          <StatBox label="EXP Level" value={player.expLevel} />
+
+          <StatBox label="Club" value={player.club || "No club"} />
+
+          <StatBox label="Icon ID" value={player.iconId ?? "N/A"} />
+        </div>
+
+        <div className="rounded-3xl border border-zinc-800 bg-zinc-900/80 p-5">
+          <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
+            <div>
+              <h3 className="text-xl font-bold">Account Summary</h3>
+              <p className="mt-1 text-sm text-zinc-400">
+                Quick check of account strength before submitting request.
+              </p>
+            </div>
+
+            <div className="rounded-full bg-yellow-400 px-4 py-2 text-sm font-black text-black">
+              {maxedPercent}% Power 11
+            </div>
+          </div>
+
+          <div className="mt-5 grid gap-4 md:grid-cols-3">
+            <SummaryBox label="Total Brawlers" value={totalBrawlers} />
+            <SummaryBox label="Power 11 Brawlers" value={power11Count} />
+            <SummaryBox label="Prestige Brawlers" value={prestigeCount} />
+            <SummaryBox label="Hypercharges" value={hyperChargeCount} />
+            <SummaryBox label="Gadgets" value={gadgetCount} />
+            <SummaryBox label="Star Powers" value={starPowerCount} />
+            <SummaryBox label="Gears" value={gearCount} />
+          </div>
+        </div>
+
+        <div className="rounded-3xl border border-zinc-800 bg-zinc-900/80 p-5">
+          <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
+            <div>
+              <h3 className="text-xl font-bold">Top Brawlers</h3>
+              <p className="mt-1 text-sm text-zinc-400">
+                Highest current trophy brawlers from this account.
+              </p>
+            </div>
+
+            <p className="text-sm text-zinc-500">
+              Showing top {topBrawlers.length}
+            </p>
+          </div>
+
+          <div className="mt-5 grid gap-4 md:grid-cols-2">
+            {topBrawlers.map((brawler) => (
+              <BrawlerRow key={brawler.id} brawler={brawler} />
+            ))}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-yellow-400/30 bg-yellow-400/10 p-4 text-sm text-yellow-200">
+          Confirm this is the correct account before submitting. Never provide
+          Supercell ID passwords, email passwords, recovery codes, or 2FA codes.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BrawlerRow({ brawler }: { brawler: Brawler }) {
+  const hasHypercharge = (brawler.hyperCharges?.length ?? 0) > 0;
+
+  return (
+    <div className="rounded-2xl border border-zinc-800 bg-zinc-950 p-4">
+      <div className="flex justify-between gap-4">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="font-bold">{brawler.name}</p>
+
+            <span className="rounded-full bg-purple-500/20 px-2 py-1 text-xs font-bold text-purple-300">
+              P{brawler.power}
+            </span>
+
+            {hasHypercharge && (
+              <span className="rounded-full bg-yellow-400 px-2 py-1 text-xs font-bold text-black">
+                Hyper
+              </span>
+            )}
+          </div>
+
+          <p className="mt-2 text-sm text-zinc-400">
+            {brawler.skin?.name || "Default skin"}
+          </p>
+        </div>
+
+        <div className="text-right">
+          <p className="text-lg font-black text-yellow-300">
+            {formatNumber(brawler.trophies)}
+          </p>
+          <p className="text-xs text-zinc-500">
+            Best {formatNumber(brawler.highestTrophies)}
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-4 grid grid-cols-3 gap-2 text-xs">
+        <MiniStat label="Gadgets" value={brawler.gadgets?.length ?? 0} />
+        <MiniStat label="SP" value={brawler.starPowers?.length ?? 0} />
+        <MiniStat label="Gears" value={brawler.gears?.length ?? 0} />
+      </div>
     </div>
   );
 }
@@ -882,6 +1348,51 @@ function SummaryRow({ label, value }: { label: string; value: string }) {
   );
 }
 
+function StatBox({
+  label,
+  value,
+}: {
+  label: string;
+  value: string | number;
+}) {
+  return (
+    <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
+      <p className="text-xs text-zinc-500">{label}</p>
+      <p className="mt-2 truncate text-lg font-bold text-white">{value}</p>
+    </div>
+  );
+}
+
+function SummaryBox({
+  label,
+  value,
+}: {
+  label: string;
+  value: string | number;
+}) {
+  return (
+    <div className="rounded-2xl border border-zinc-800 bg-zinc-950 p-4">
+      <p className="text-sm text-zinc-500">{label}</p>
+      <p className="mt-2 text-3xl font-black text-yellow-400">{value}</p>
+    </div>
+  );
+}
+
+function MiniStat({
+  label,
+  value,
+}: {
+  label: string;
+  value: string | number;
+}) {
+  return (
+    <div className="rounded-xl bg-zinc-900 p-2 text-center">
+      <p className="text-zinc-500">{label}</p>
+      <p className="font-bold text-zinc-200">{value}</p>
+    </div>
+  );
+}
+
 function TrustPanel() {
   return (
     <div className="rounded-3xl border border-zinc-800 bg-zinc-950/80 p-6">
@@ -908,9 +1419,9 @@ function TrustPanel() {
         </div>
 
         <div className="rounded-2xl bg-zinc-900 p-4">
-          <p className="font-semibold">Live dashboard</p>
+          <p className="font-semibold">Verified player tag</p>
           <p className="mt-1 text-sm text-zinc-500">
-            Track status, credits, and chat updates.
+            Requests require a valid Brawl Stars player tag before submission.
           </p>
         </div>
       </div>
