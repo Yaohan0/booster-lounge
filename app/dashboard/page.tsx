@@ -61,11 +61,11 @@ export default function DashboardPage() {
   const [username, setUsername] = useState("");
   const [usernameDraft, setUsernameDraft] = useState("");
   const [credits, setCredits] = useState(0);
+
+  const [currentUserId, setCurrentUserId] = useState("");
+  const [chatInputs, setChatInputs] = useState<Record<string, string>>({});
   const [profileMessage, setProfileMessage] = useState("");
   const [resetMessage, setResetMessage] = useState("");
-
-  const [chatInputs, setChatInputs] = useState<Record<string, string>>({});
-  const [currentUserId, setCurrentUserId] = useState("");
 
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<DashboardTab>("overview");
@@ -80,75 +80,75 @@ export default function DashboardPage() {
   );
 
   useEffect(() => {
-    async function loadData() {
-      setLoading(true);
+    loadData();
+  }, []);
 
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+  async function loadData() {
+    setLoading(true);
 
-      if (!user) {
-        router.push("/login");
-        return;
-      }
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
 
-      setEmail(user.email ?? "");
-      setCurrentUserId(user.id);
-
-      const { data: profile, error: profileError } = await supabase
-        .from("profiles")
-        .select("email, username, credits")
-        .eq("id", user.id)
-        .single();
-
-      if (!profileError && profile) {
-        const userProfile = profile as Profile;
-        setUsername(userProfile.username ?? "");
-        setUsernameDraft(userProfile.username ?? "");
-        setCredits(Number(userProfile.credits ?? 0));
-      }
-
-      const { data: requestData, error: requestError } = await supabase
-        .from("order_requests")
-        .select("*")
-        .order("created_at", { ascending: false });
-
-      if (requestError) {
-        console.error(requestError.message);
-        setLoading(false);
-        return;
-      }
-
-      const { data: orderData, error: orderError } = await supabase
-        .from("orders")
-        .select("*")
-        .order("created_at", { ascending: false });
-
-      if (orderError) {
-        console.error(orderError.message);
-        setLoading(false);
-        return;
-      }
-
-      const { data: messageData, error: messageError } = await supabase
-        .from("messages")
-        .select("*")
-        .order("created_at", { ascending: true });
-
-      if (messageError) {
-        console.error(messageError.message);
-        setLoading(false);
-        return;
-      }
-
-      setRequests((requestData ?? []) as OrderRequest[]);
-      setOrders((orderData ?? []) as Order[]);
-      setMessages((messageData ?? []) as Message[]);
-      setLoading(false);
+    if (!user) {
+      router.push("/login");
+      return;
     }
 
-    loadData();
-  }, [router, supabase]);
+    setEmail(user.email ?? "");
+    setCurrentUserId(user.id);
+
+    const { data: profile, error: profileError } = await supabase
+      .from("profiles")
+      .select("email, username, credits")
+      .eq("id", user.id)
+      .single();
+
+    if (!profileError && profile) {
+      const userProfile = profile as Profile;
+      setUsername(userProfile.username ?? "");
+      setUsernameDraft(userProfile.username ?? "");
+      setCredits(Number(userProfile.credits ?? 0));
+    }
+
+    const { data: requestData, error: requestError } = await supabase
+      .from("order_requests")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (requestError) {
+      console.error(requestError.message);
+      setLoading(false);
+      return;
+    }
+
+    const { data: orderData, error: orderError } = await supabase
+      .from("orders")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (orderError) {
+      console.error(orderError.message);
+      setLoading(false);
+      return;
+    }
+
+    const { data: messageData, error: messageError } = await supabase
+      .from("messages")
+      .select("*")
+      .order("created_at", { ascending: true });
+
+    if (messageError) {
+      console.error(messageError.message);
+      setLoading(false);
+      return;
+    }
+
+    setRequests((requestData ?? []) as OrderRequest[]);
+    setOrders((orderData ?? []) as Order[]);
+    setMessages((messageData ?? []) as Message[]);
+    setLoading(false);
+  }
 
   function formatDate(date: string | null) {
     if (!date) return "N/A";
@@ -188,7 +188,7 @@ export default function DashboardPage() {
 
   async function sendPasswordResetEmail() {
     if (!email) {
-      alert("No email found for this account.");
+      alert("No email found.");
       return;
     }
 
@@ -269,6 +269,10 @@ export default function DashboardPage() {
       [orderId]: "",
     }));
 
+    await loadMessagesOnly();
+  }
+
+  async function loadMessagesOnly() {
     const { data: messageData, error: messageError } = await supabase
       .from("messages")
       .select("*")
@@ -323,7 +327,7 @@ export default function DashboardPage() {
   return (
     <PageShell
       title="Dashboard"
-      subtitle="Track your requests, orders, credits, completed history, and admin chat."
+      subtitle="Track requests, active orders, completed history, credits, and admin chat."
       rightAction={
         <div className="flex flex-wrap gap-3">
           <Link
@@ -363,7 +367,7 @@ export default function DashboardPage() {
 
         <QuickLinkCard
           title="Offers"
-          description="View limited bundles and special deals."
+          description="View bundles and special deals."
           href="/offers"
         />
       </section>
@@ -371,20 +375,14 @@ export default function DashboardPage() {
       {unreadOrders.length > 0 && (
         <div className="mt-8 rounded-2xl border border-yellow-400/40 bg-yellow-400/10 p-5">
           <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
-            <div className="flex items-center gap-4">
-              <div className="flex h-11 w-11 items-center justify-center rounded-full bg-yellow-400 text-xl text-black">
-                🔔
-              </div>
-
-              <div>
-                <h2 className="font-bold text-yellow-300">
-                  Unread Order Updates
-                </h2>
-                <p className="text-sm text-zinc-300">
-                  You have {unreadOrders.length} unread update
-                  {unreadOrders.length === 1 ? "" : "s"}.
-                </p>
-              </div>
+            <div>
+              <h2 className="font-bold text-yellow-300">
+                Unread Order Updates
+              </h2>
+              <p className="text-sm text-zinc-300">
+                You have {unreadOrders.length} unread update
+                {unreadOrders.length === 1 ? "" : "s"}.
+              </p>
             </div>
 
             <button
@@ -411,32 +409,30 @@ export default function DashboardPage() {
         <StatCard label="Completed" value={completedOrders.length} />
       </section>
 
-      <section className="mt-8">
-        <div className="flex flex-wrap gap-2">
-          <TabButton
-            label="Overview"
-            active={activeTab === "overview"}
-            onClick={() => setActiveTab("overview")}
-          />
+      <section className="mt-8 flex flex-wrap gap-2">
+        <TabButton
+          label="Overview"
+          active={activeTab === "overview"}
+          onClick={() => setActiveTab("overview")}
+        />
 
-          <TabButton
-            label={`Active Orders (${activeOrders.length})`}
-            active={activeTab === "orders"}
-            onClick={() => setActiveTab("orders")}
-          />
+        <TabButton
+          label={`Active Orders (${activeOrders.length})`}
+          active={activeTab === "orders"}
+          onClick={() => setActiveTab("orders")}
+        />
 
-          <TabButton
-            label={`Requests (${requests.length})`}
-            active={activeTab === "requests"}
-            onClick={() => setActiveTab("requests")}
-          />
+        <TabButton
+          label={`Requests (${requests.length})`}
+          active={activeTab === "requests"}
+          onClick={() => setActiveTab("requests")}
+        />
 
-          <TabButton
-            label={`History (${completedOrders.length})`}
-            active={activeTab === "history"}
-            onClick={() => setActiveTab("history")}
-          />
-        </div>
+        <TabButton
+          label={`History (${completedOrders.length})`}
+          active={activeTab === "history"}
+          onClick={() => setActiveTab("history")}
+        />
       </section>
 
       {activeTab === "overview" && (
@@ -503,32 +499,7 @@ export default function DashboardPage() {
             </div>
           </Panel>
 
-          <Panel
-            title="What to do next"
-            subtitle="Common actions for your account."
-          >
-            <div className="mt-5 grid gap-3">
-              <ActionRow
-                title="Submit a new boost request"
-                description="Rank boost, trophy boost, prestige, coaching, or custom."
-                href="/services"
-              />
-
-              <ActionRow
-                title="Browse account listings"
-                description="Request an account listing for admin review."
-                href="/accounts"
-              />
-
-              <ActionRow
-                title="Check special offers"
-                description="Limited-time bundles and deals."
-                href="/offers"
-              />
-            </div>
-          </Panel>
-
-          <Panel title="Profile" subtitle="Quick access to account details.">
+          <Panel title="Profile" subtitle="Account details and password reset.">
             <div className="mt-5 grid gap-4">
               <div className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-4">
                 <label className="text-sm font-semibold text-zinc-300">
@@ -575,6 +546,28 @@ export default function DashboardPage() {
               )}
             </div>
           </Panel>
+
+          <Panel title="Quick Actions" subtitle="Common actions.">
+            <div className="mt-5 grid gap-3">
+              <ActionRow
+                title="Submit a new boost request"
+                description="Rank boost, trophy boost, prestige, coaching, or custom."
+                href="/services"
+              />
+
+              <ActionRow
+                title="Browse account listings"
+                description="Request an account listing for admin review."
+                href="/accounts"
+              />
+
+              <ActionRow
+                title="Check special offers"
+                description="Limited bundles and deals."
+                href="/offers"
+              />
+            </div>
+          </Panel>
         </section>
       )}
 
@@ -587,7 +580,7 @@ export default function DashboardPage() {
 
           <div className="mt-6 grid gap-5">
             {activeOrders.length === 0 && (
-              <EmptyState text="No active orders assigned yet. Accepted requests may become orders later." />
+              <EmptyState text="No active orders assigned yet." />
             )}
 
             {activeOrders.map((order) => (
@@ -631,18 +624,7 @@ export default function DashboardPage() {
 
           <div className="mt-6 grid gap-5">
             {requests.length === 0 && (
-              <div className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-8 text-center">
-                <p className="text-zinc-400">
-                  No requests yet. Submit one from the services page.
-                </p>
-
-                <Link
-                  href="/services"
-                  className="mt-5 inline-flex rounded-xl bg-yellow-400 px-5 py-3 font-bold text-black hover:bg-yellow-300"
-                >
-                  Browse Services
-                </Link>
-              </div>
+              <EmptyState text="No requests yet. Submit one from the services page." />
             )}
 
             {requests.map((request) => (
@@ -845,6 +827,35 @@ function EmptyState({ text }: { text: string }) {
   );
 }
 
+function InfoRow({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="flex items-center justify-between gap-4 rounded-xl bg-zinc-950/80 p-3">
+      <span className="text-zinc-500">{label}</span>
+      <span className="font-semibold text-zinc-200">{value}</span>
+    </div>
+  );
+}
+
+function ActionRow({
+  title,
+  description,
+  href,
+}: {
+  title: string;
+  description: string;
+  href: string;
+}) {
+  return (
+    <Link
+      href={href}
+      className="rounded-xl border border-zinc-800 bg-zinc-950/80 p-4 hover:border-yellow-400/40"
+    >
+      <p className="font-semibold">{title}</p>
+      <p className="mt-1 text-sm text-zinc-500">{description}</p>
+    </Link>
+  );
+}
+
 function DateBox({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-xl border border-zinc-800 bg-zinc-950/80 p-3">
@@ -872,35 +883,6 @@ function InfoBox({
     <div className={`mt-5 rounded-xl border p-4 text-sm ${tones[tone]}`}>
       {children}
     </div>
-  );
-}
-
-function InfoRow({ label, value }: { label: string; value: string | number }) {
-  return (
-    <div className="flex items-center justify-between gap-4 rounded-xl bg-zinc-950/80 p-3">
-      <span className="text-zinc-500">{label}</span>
-      <span className="font-semibold text-zinc-200">{value}</span>
-    </div>
-  );
-}
-
-function ActionRow({
-  title,
-  description,
-  href,
-}: {
-  title: string;
-  description: string;
-  href: string;
-}) {
-  return (
-    <Link
-      href={href}
-      className="rounded-xl border border-zinc-800 bg-zinc-950/80 p-4 hover:border-yellow-400/40"
-    >
-      <p className="font-semibold">{title}</p>
-      <p className="mt-1 text-sm text-zinc-500">{description}</p>
-    </Link>
   );
 }
 
@@ -1012,12 +994,6 @@ function RequestCard({
         <InfoBox tone="yellow">Your request is pending admin review.</InfoBox>
       )}
 
-      {request.status === "accepted" && (
-        <InfoBox tone="green">
-          Your request has been accepted. Admin may assign an order soon.
-        </InfoBox>
-      )}
-
       {request.status === "rejected" && (
         <InfoBox tone="red">
           Your request was rejected.
@@ -1085,12 +1061,6 @@ function OrderCard({
                 New Update
               </span>
             )}
-
-            {order.admin_archived && (
-              <span className="rounded-full border border-zinc-600 bg-zinc-800 px-3 py-1 text-xs text-zinc-300">
-                archived by admin
-              </span>
-            )}
           </div>
 
           <p className="mt-2 text-sm text-zinc-400">
@@ -1125,20 +1095,17 @@ function OrderCard({
 
       {order.status === "accepted" && (
         <InfoBox tone="green">
-          Your order has been accepted. The admin will update progress soon.
+          Your order has been accepted. Admin will update progress soon.
         </InfoBox>
       )}
 
       {order.status === "rejected" && (
-        <InfoBox tone="red">
-          Your order has been rejected. Contact support or wait for admin
-          follow-up.
-        </InfoBox>
+        <InfoBox tone="red">Your order has been rejected.</InfoBox>
       )}
 
       {order.status === "completed" && (
         <InfoBox tone="blue">
-          This boost has been completed and is saved in your boost history.
+          This boost has been completed and saved in your boost history.
         </InfoBox>
       )}
 
@@ -1183,7 +1150,7 @@ function OrderCard({
           <div className="mt-4 flex gap-2">
             <input
               className="flex-1 rounded-xl bg-zinc-800 p-3 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
-              placeholder="Type a message..."
+              placeholder="Message admin..."
               value={chatInputs[order.id] ?? ""}
               onChange={(e) =>
                 setChatInputs((prev) => ({
@@ -1229,62 +1196,82 @@ function FloatingSupportChat({
   setChatInputs: React.Dispatch<React.SetStateAction<Record<string, string>>>;
   sendMessage: (orderId: string) => Promise<void>;
 }) {
+  const chatOrders = activeOrders.filter((order) => order.status !== "rejected");
   const selectedOrder =
-    activeOrders.find((order) => order.id === selectedOrderId) ||
-    activeOrders[0];
+    chatOrders.find((order) => order.id === selectedOrderId) ||
+    chatOrders[0] ||
+    null;
 
-  const orderMessages = selectedOrder
+  const selectedMessages = selectedOrder
     ? messages.filter((message) => message.order_id === selectedOrder.id)
     : [];
 
+  useEffect(() => {
+    if (!selectedChatOrderExists(selectedOrderId, chatOrders)) {
+      setSelectedOrderId(chatOrders[0]?.id ?? null);
+    }
+  }, [selectedOrderId, chatOrders.length]);
+
+  function selectedChatOrderExists(orderId: string | null, orders: Order[]) {
+    if (!orderId) return false;
+    return orders.some((order) => order.id === orderId);
+  }
+
   return (
-    <div className="fixed bottom-6 right-6 z-50">
+    <>
+      <button
+        onClick={() => setOpen(!open)}
+        className="fixed bottom-6 right-6 z-40 flex h-16 w-16 items-center justify-center rounded-full bg-yellow-400 text-2xl font-bold text-black shadow-2xl shadow-yellow-400/30 hover:bg-yellow-300"
+      >
+        💬
+      </button>
+
       {open && (
-        <div className="mb-4 w-[350px] overflow-hidden rounded-3xl border border-zinc-800 bg-zinc-950 shadow-2xl">
-          <div className="flex items-center justify-between border-b border-zinc-800 bg-zinc-900 px-5 py-4">
+        <div className="fixed bottom-24 right-6 z-40 w-[min(420px,calc(100vw-3rem))] overflow-hidden rounded-3xl border border-zinc-800 bg-zinc-950 shadow-2xl">
+          <div className="flex items-center justify-between border-b border-zinc-800 bg-zinc-900 p-4">
             <div>
-              <p className="font-bold">24/7 Support</p>
-              <p className="text-xs text-zinc-400">Chat with admin</p>
+              <p className="font-bold">Support Chat</p>
+              <p className="text-xs text-zinc-400">Chat tied to active order</p>
             </div>
 
             <button
               onClick={() => setOpen(false)}
               className="rounded-lg bg-zinc-800 px-3 py-1 text-sm hover:bg-zinc-700"
             >
-              ×
+              Close
             </button>
           </div>
 
           <div className="p-4">
-            {activeOrders.length === 0 && (
-              <p className="text-sm text-zinc-400">
-                No active orders available for chat yet.
+            {chatOrders.length === 0 && (
+              <p className="rounded-xl bg-zinc-900 p-4 text-sm text-zinc-400">
+                No active order chat yet.
               </p>
             )}
 
-            {activeOrders.length > 0 && selectedOrder && (
+            {chatOrders.length > 0 && selectedOrder && (
               <>
                 <select
                   className="w-full rounded-xl bg-zinc-800 p-3 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
                   value={selectedOrder.id}
                   onChange={(e) => setSelectedOrderId(e.target.value)}
                 >
-                  {activeOrders.map((order) => (
+                  {chatOrders.map((order) => (
                     <option key={order.id} value={order.id}>
-                      {order.service_type} — {order.status}
+                      {order.service_type} • {order.status}
                     </option>
                   ))}
                 </select>
 
-                <div className="mt-4 max-h-72 space-y-3 overflow-y-auto rounded-2xl bg-zinc-900 p-3">
-                  {orderMessages.length === 0 && (
+                <div className="mt-4 max-h-72 space-y-3 overflow-y-auto rounded-xl bg-zinc-950 p-3">
+                  {selectedMessages.length === 0 && (
                     <p className="text-sm text-zinc-500">No messages yet.</p>
                   )}
 
-                  {orderMessages.map((message) => (
+                  {selectedMessages.map((message) => (
                     <div
                       key={message.id}
-                      className={`max-w-[85%] rounded-2xl p-3 text-sm ${
+                      className={`max-w-[85%] rounded-xl p-3 text-sm ${
                         message.sender_id === currentUserId
                           ? "ml-auto bg-yellow-400 text-black"
                           : "mr-auto bg-zinc-800 text-white"
@@ -1320,19 +1307,6 @@ function FloatingSupportChat({
           </div>
         </div>
       )}
-
-      <button
-        onClick={() => {
-          if (!selectedOrderId && activeOrders.length > 0) {
-            setSelectedOrderId(activeOrders[0].id);
-          }
-
-          setOpen(!open);
-        }}
-        className="flex h-16 w-16 items-center justify-center rounded-full bg-yellow-400 text-2xl text-black shadow-2xl shadow-yellow-400/30 hover:bg-yellow-300"
-      >
-        🎧
-      </button>
-    </div>
+    </>
   );
 }

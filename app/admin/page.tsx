@@ -1,9 +1,9 @@
 "use client";
 
-import AdminProductManager from "../../components/AdminProductManager";
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import PageShell from "@/components/PageShell";
 import StatusBadge from "@/components/StatusBadge";
 
@@ -13,6 +13,20 @@ type Profile = {
   username: string | null;
   role: string | null;
   credits: number | null;
+  created_at?: string;
+};
+
+type OrderRequest = {
+  id: string;
+  user_id: string;
+  service_type: string;
+  current_rank: string | null;
+  target_rank: string | null;
+  notes: string | null;
+  status: string;
+  admin_notes: string | null;
+  created_at: string;
+  updated_at: string | null;
 };
 
 type Order = {
@@ -30,19 +44,6 @@ type Order = {
   admin_archived: boolean | null;
 };
 
-type OrderRequest = {
-  id: string;
-  user_id: string;
-  service_type: string;
-  current_rank: string | null;
-  target_rank: string | null;
-  notes: string | null;
-  status: string;
-  admin_notes: string | null;
-  created_at: string;
-  updated_at: string | null;
-};
-
 type Message = {
   id: string;
   order_id: string;
@@ -51,25 +52,33 @@ type Message = {
   created_at: string;
 };
 
-type OrderEditData = {
-  service_type: string;
-  current_rank: string;
-  target_rank: string;
-  notes: string;
-  status: string;
-};
+type AdminTab = "overview" | "requests" | "orders" | "users";
+
+const orderStatuses = [
+  "pending",
+  "accepted",
+  "rejected",
+  "in_progress",
+  "completed",
+  "cancelled",
+];
 
 export default function AdminPage() {
   const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
 
-  const [profiles, setProfiles] = useState<Profile[]>([]);
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [requests, setRequests] = useState<OrderRequest[]>([]);
-  const [messages, setMessages] = useState<Message[]>([]);
-
   const [allowed, setAllowed] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [currentUserId, setCurrentUserId] = useState("");
+
+  const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [requests, setRequests] = useState<OrderRequest[]>([]);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [messages, setMessages] = useState<Message[]>([]);
+
+  const [activeTab, setActiveTab] = useState<AdminTab>("overview");
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
 
   const [selectedUserId, setSelectedUserId] = useState("");
   const [serviceType, setServiceType] = useState("Rank Boost");
@@ -77,15 +86,9 @@ export default function AdminPage() {
   const [targetRank, setTargetRank] = useState("");
   const [notes, setNotes] = useState("");
 
+  const [adminNotes, setAdminNotes] = useState<Record<string, string>>({});
   const [chatInputs, setChatInputs] = useState<Record<string, string>>({});
-  const [currentUserId, setCurrentUserId] = useState("");
-
-  const [userSearch, setUserSearch] = useState("");
-  const [requestSearch, setRequestSearch] = useState("");
-  const [orderSearch, setOrderSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [selectedProfileId, setSelectedProfileId] = useState("");
-
+  const [creditInputs, setCreditInputs] = useState<Record<string, string>>({});
   const [usernameInputs, setUsernameInputs] = useState<Record<string, string>>(
     {}
   );
@@ -105,13 +108,13 @@ export default function AdminPage() {
 
       setCurrentUserId(user.id);
 
-      const { data: currentProfile } = await supabase
+      const { data: profile, error } = await supabase
         .from("profiles")
         .select("role")
         .eq("id", user.id)
         .single();
 
-      if (currentProfile?.role !== "admin") {
+      if (error || profile?.role !== "admin") {
         router.push("/dashboard");
         return;
       }
@@ -124,43 +127,14 @@ export default function AdminPage() {
     loadAdminData();
   }, [router, supabase]);
 
-  function formatDate(date: string | null) {
-    if (!date) return "N/A";
-
-    return new Intl.DateTimeFormat("en-SG", {
-      dateStyle: "medium",
-      timeStyle: "short",
-    }).format(new Date(date));
-  }
-
-  function getUserLabel(userId: string) {
-    const profile = profiles.find((item) => item.id === userId);
-
-    if (!profile) return userId;
-
-    return `${profile.username || "No username"} • ${
-      profile.email || "No email"
-    }`;
-  }
-
   async function refreshAdminData() {
     const { data: profileData, error: profileError } = await supabase
       .from("profiles")
-      .select("id, email, username, role, credits")
+      .select("id, email, username, role, credits, created_at")
       .order("created_at", { ascending: false });
 
     if (profileError) {
       alert(profileError.message);
-      return;
-    }
-
-    const { data: orderData, error: orderError } = await supabase
-      .from("orders")
-      .select("*")
-      .order("created_at", { ascending: false });
-
-    if (orderError) {
-      alert(orderError.message);
       return;
     }
 
@@ -171,6 +145,16 @@ export default function AdminPage() {
 
     if (requestError) {
       alert(requestError.message);
+      return;
+    }
+
+    const { data: orderData, error: orderError } = await supabase
+      .from("orders")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (orderError) {
+      alert(orderError.message);
       return;
     }
 
@@ -185,22 +169,64 @@ export default function AdminPage() {
     }
 
     setProfiles((profileData ?? []) as Profile[]);
-    setOrders((orderData ?? []) as Order[]);
     setRequests((requestData ?? []) as OrderRequest[]);
+    setOrders((orderData ?? []) as Order[]);
     setMessages((messageData ?? []) as Message[]);
 
-    const nextInputs: Record<string, string> = {};
+    const nextCreditInputs: Record<string, string> = {};
+    const nextUsernameInputs: Record<string, string> = {};
+
     (profileData ?? []).forEach((profile) => {
-      nextInputs[profile.id] = profile.username || "";
+      nextCreditInputs[profile.id] = String(profile.credits ?? 0);
+      nextUsernameInputs[profile.id] = profile.username ?? "";
     });
-    setUsernameInputs(nextInputs);
+
+    setCreditInputs(nextCreditInputs);
+    setUsernameInputs(nextUsernameInputs);
   }
 
-  async function assignOrder(e: React.FormEvent) {
+  function formatDate(date: string | null) {
+    if (!date) return "N/A";
+
+    return new Intl.DateTimeFormat("en-SG", {
+      dateStyle: "medium",
+      timeStyle: "short",
+    }).format(new Date(date));
+  }
+
+  function getUser(userId: string) {
+    return profiles.find((profile) => profile.id === userId);
+  }
+
+  function getUserLabel(userId: string) {
+    const profile = getUser(userId);
+
+    if (!profile) return userId;
+
+    return `${profile.username || "No username"} • ${
+      profile.email || "No email"
+    }`;
+  }
+
+  function matchesSearch(text: string) {
+    return text.toLowerCase().includes(search.toLowerCase());
+  }
+
+  async function logout() {
+    await supabase.auth.signOut();
+    router.push("/");
+  }
+
+  async function createManualOrder(e: React.FormEvent) {
     e.preventDefault();
 
     if (!selectedUserId) {
       alert("Select a user first.");
+      return;
+    }
+
+    if (!serviceType.trim()) {
+      alert("Service type is required.");
       return;
     }
 
@@ -213,7 +239,6 @@ export default function AdminPage() {
       status: "pending",
       user_seen_update: false,
       admin_archived: false,
-      updated_at: new Date().toISOString(),
     });
 
     if (error) {
@@ -230,7 +255,80 @@ export default function AdminPage() {
     await refreshAdminData();
   }
 
-  async function updateStatus(orderId: string, status: string) {
+  async function convertRequestToOrder(request: OrderRequest) {
+    const { error: orderError } = await supabase.from("orders").insert({
+      user_id: request.user_id,
+      service_type: request.service_type,
+      current_rank: request.current_rank,
+      target_rank: request.target_rank,
+      notes: request.notes,
+      status: "accepted",
+      user_seen_update: false,
+      admin_archived: false,
+    });
+
+    if (orderError) {
+      alert(orderError.message);
+      return;
+    }
+
+    const { error: requestError } = await supabase
+      .from("order_requests")
+      .update({
+        status: "converted_to_order",
+        admin_notes:
+          adminNotes[request.id]?.trim() ||
+          "Request accepted and converted to order.",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", request.id);
+
+    if (requestError) {
+      alert(requestError.message);
+      return;
+    }
+
+    await refreshAdminData();
+  }
+
+  async function rejectRequest(requestId: string) {
+    const { error } = await supabase
+      .from("order_requests")
+      .update({
+        status: "rejected",
+        admin_notes:
+          adminNotes[requestId]?.trim() || "Request rejected by admin.",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", requestId);
+
+    if (error) {
+      alert(error.message);
+      return;
+    }
+
+    await refreshAdminData();
+  }
+
+  async function deleteRequest(requestId: string) {
+    const confirmed = confirm("Delete this request permanently?");
+
+    if (!confirmed) return;
+
+    const { error } = await supabase
+      .from("order_requests")
+      .delete()
+      .eq("id", requestId);
+
+    if (error) {
+      alert(error.message);
+      return;
+    }
+
+    await refreshAdminData();
+  }
+
+  async function updateOrderStatus(order: Order, status: string) {
     const updateData: Partial<Order> = {
       status,
       updated_at: new Date().toISOString(),
@@ -239,87 +337,74 @@ export default function AdminPage() {
 
     if (status === "completed") {
       updateData.completed_at = new Date().toISOString();
+      updateData.admin_archived = true;
     }
 
     const { error } = await supabase
       .from("orders")
       .update(updateData)
-      .eq("id", orderId);
+      .eq("id", order.id);
 
     if (error) {
       alert(error.message);
       return;
     }
 
-    setOrders((prev) =>
-      prev.map((order) =>
-        order.id === orderId ? { ...order, ...updateData } : order
-      )
-    );
+    await refreshAdminData();
   }
 
-  async function updateOrderDetails(orderId: string, data: OrderEditData) {
-    const payload: Partial<Order> = {
-      service_type: data.service_type,
-      current_rank: data.current_rank,
-      target_rank: data.target_rank,
-      notes: data.notes,
-      status: data.status,
-      updated_at: new Date().toISOString(),
-      user_seen_update: false,
-    };
-
-    if (data.status === "completed") {
-      payload.completed_at = new Date().toISOString();
-    }
-
+  async function saveOrder(order: Order) {
     const { error } = await supabase
       .from("orders")
-      .update(payload)
-      .eq("id", orderId);
+      .update({
+        service_type: order.service_type,
+        current_rank: order.current_rank,
+        target_rank: order.target_rank,
+        notes: order.notes,
+        updated_at: new Date().toISOString(),
+        user_seen_update: false,
+      })
+      .eq("id", order.id);
 
     if (error) {
       alert(error.message);
       return;
     }
 
-    setOrders((prev) =>
-      prev.map((order) =>
-        order.id === orderId ? { ...order, ...payload } : order
-      )
-    );
+    await refreshAdminData();
   }
 
-  async function deleteOrder(order: Order) {
+  async function deleteOrder(orderId: string) {
     const confirmed = confirm(
-      `Delete this ${order.status} order permanently? This cannot be undone.`
+      "Delete this order permanently? Completed order history will be removed too."
     );
 
     if (!confirmed) return;
 
-    const { error } = await supabase.from("orders").delete().eq("id", order.id);
+    const { error: messageError } = await supabase
+      .from("messages")
+      .delete()
+      .eq("order_id", orderId);
+
+    if (messageError) {
+      alert(messageError.message);
+      return;
+    }
+
+    const { error } = await supabase.from("orders").delete().eq("id", orderId);
 
     if (error) {
       alert(error.message);
       return;
     }
 
-    setOrders((prev) => prev.filter((item) => item.id !== order.id));
+    await refreshAdminData();
   }
 
-  async function archiveCompletedOrder(orderId: string) {
-    const confirmed = confirm(
-      "Remove this completed order from the active admin list? The user will still see it in completed history."
-    );
-
-    if (!confirmed) return;
-
+  async function archiveOrder(orderId: string) {
     const { error } = await supabase
       .from("orders")
-      .update({
-        admin_archived: true,
-        updated_at: new Date().toISOString(),
-      })
+      .update({ admin_archived: true })
       .eq("id", orderId);
 
     if (error) {
@@ -327,47 +412,12 @@ export default function AdminPage() {
       return;
     }
 
-    setOrders((prev) =>
-      prev.map((order) =>
-        order.id === orderId
-          ? {
-              ...order,
-              admin_archived: true,
-              updated_at: new Date().toISOString(),
-            }
-          : order
-      )
-    );
+    await refreshAdminData();
   }
 
-  async function restoreArchivedOrder(orderId: string) {
-    const { error } = await supabase
-      .from("orders")
-      .update({
-        admin_archived: false,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", orderId);
+  async function updateCredits(userId: string) {
+    const credits = Number(creditInputs[userId] ?? 0);
 
-    if (error) {
-      alert(error.message);
-      return;
-    }
-
-    setOrders((prev) =>
-      prev.map((order) =>
-        order.id === orderId
-          ? {
-              ...order,
-              admin_archived: false,
-              updated_at: new Date().toISOString(),
-            }
-          : order
-      )
-    );
-  }
-
-  async function updateCredits(userId: string, credits: number) {
     const { error } = await supabase
       .from("profiles")
       .update({ credits })
@@ -378,20 +428,11 @@ export default function AdminPage() {
       return;
     }
 
-    setProfiles((prev) =>
-      prev.map((profile) =>
-        profile.id === userId ? { ...profile, credits } : profile
-      )
-    );
+    await refreshAdminData();
   }
 
   async function updateUsername(userId: string) {
-    const username = usernameInputs[userId]?.trim();
-
-    if (!username) {
-      alert("Username cannot be empty.");
-      return;
-    }
+    const username = usernameInputs[userId]?.trim() || null;
 
     const { error } = await supabase
       .from("profiles")
@@ -403,79 +444,6 @@ export default function AdminPage() {
       return;
     }
 
-    setProfiles((prev) =>
-      prev.map((profile) =>
-        profile.id === userId ? { ...profile, username } : profile
-      )
-    );
-  }
-
-  async function deleteRequest(requestId: string) {
-    const { error } = await supabase
-      .from("order_requests")
-      .delete()
-      .eq("id", requestId);
-
-    if (error) {
-      alert(error.message);
-      return false;
-    }
-
-    setRequests((prev) => prev.filter((request) => request.id !== requestId));
-    return true;
-  }
-
-  async function rejectRequest(request: OrderRequest) {
-    const confirmed = confirm(
-      "Reject this request and remove it from Incoming Requests?"
-    );
-
-    if (!confirmed) return;
-
-    await deleteRequest(request.id);
-  }
-
-  async function acceptRequestAndCreateOrder(request: OrderRequest) {
-    const { error: orderError } = await supabase.from("orders").insert({
-      user_id: request.user_id,
-      service_type: request.service_type,
-      current_rank: request.current_rank,
-      target_rank: request.target_rank,
-      notes: request.notes,
-      status: "accepted",
-      user_seen_update: false,
-      admin_archived: false,
-      updated_at: new Date().toISOString(),
-    });
-
-    if (orderError) {
-      alert(orderError.message);
-      return;
-    }
-
-    await deleteRequest(request.id);
-    await refreshAdminData();
-  }
-
-  async function convertRequestToOrder(request: OrderRequest) {
-    const { error: orderError } = await supabase.from("orders").insert({
-      user_id: request.user_id,
-      service_type: request.service_type,
-      current_rank: request.current_rank,
-      target_rank: request.target_rank,
-      notes: request.notes,
-      status: "pending",
-      user_seen_update: false,
-      admin_archived: false,
-      updated_at: new Date().toISOString(),
-    });
-
-    if (orderError) {
-      alert(orderError.message);
-      return;
-    }
-
-    await deleteRequest(request.id);
     await refreshAdminData();
   }
 
@@ -500,83 +468,43 @@ export default function AdminPage() {
       [orderId]: "",
     }));
 
-    const { data: messageData, error: messageError } = await supabase
-      .from("messages")
-      .select("*")
-      .order("created_at", { ascending: true });
-
-    if (messageError) {
-      alert(messageError.message);
-      return;
-    }
-
-    setMessages((messageData ?? []) as Message[]);
+    await refreshAdminData();
   }
 
-  async function logout() {
-    await supabase.auth.signOut();
-    router.push("/");
-  }
+  const pendingRequests = requests.filter(
+    (request) => request.status === "pending"
+  );
 
-  const filteredProfiles = profiles.filter((profile) => {
-    const search = userSearch.toLowerCase();
+  const processedRequests = requests.filter(
+    (request) => request.status !== "pending"
+  );
 
-    return (
-      profile.email?.toLowerCase().includes(search) ||
-      profile.username?.toLowerCase().includes(search) ||
-      profile.role?.toLowerCase().includes(search)
+  const visibleOrders = orders.filter((order) => !order.admin_archived);
+  const completedOrders = orders.filter((order) => order.status === "completed");
+
+  const filteredRequests = pendingRequests.filter((request) => {
+    const user = getUserLabel(request.user_id);
+
+    return matchesSearch(
+      `${user} ${request.service_type} ${request.current_rank} ${request.target_rank} ${request.notes}`
     );
   });
 
-  const filteredRequests = requests
-    .filter((request) => request.status === "pending")
-    .filter((request) => {
-      const search = requestSearch.toLowerCase();
-      const user = profiles.find((profile) => profile.id === request.user_id);
-      const userLabel = getUserLabel(request.user_id).toLowerCase();
+  const filteredOrders = visibleOrders.filter((order) => {
+    const user = getUserLabel(order.user_id);
+    const statusMatch = statusFilter === "all" || order.status === statusFilter;
 
-      return (
-        userLabel.includes(search) ||
-        user?.email?.toLowerCase().includes(search) ||
-        user?.username?.toLowerCase().includes(search) ||
-        request.service_type.toLowerCase().includes(search) ||
-        request.current_rank?.toLowerCase().includes(search) ||
-        request.target_rank?.toLowerCase().includes(search) ||
-        request.notes?.toLowerCase().includes(search)
-      );
-    });
-
-  const activeOrders = orders.filter((order) => order.admin_archived !== true);
-
-  const filteredOrders = activeOrders.filter((order) => {
-    const search = orderSearch.toLowerCase();
-    const userLabel = getUserLabel(order.user_id).toLowerCase();
-
-    const matchesSearch =
-      userLabel.includes(search) ||
-      order.service_type.toLowerCase().includes(search) ||
-      order.current_rank?.toLowerCase().includes(search) ||
-      order.target_rank?.toLowerCase().includes(search) ||
-      order.notes?.toLowerCase().includes(search) ||
-      order.status.toLowerCase().includes(search);
-
-    const matchesStatus =
-      statusFilter === "all" || order.status === statusFilter;
-
-    return matchesSearch && matchesStatus;
+    return (
+      statusMatch &&
+      matchesSearch(
+        `${user} ${order.service_type} ${order.current_rank} ${order.target_rank} ${order.notes} ${order.status}`
+      )
+    );
   });
 
-  const completedOrders = orders.filter((order) => order.status === "completed");
-  const archivedOrders = orders.filter((order) => order.admin_archived === true);
-  const rejectedOrders = orders.filter((order) => order.status === "rejected");
-
-  const selectedProfile = profiles.find(
-    (profile) => profile.id === selectedProfileId
+  const filteredProfiles = profiles.filter((profile) =>
+    matchesSearch(`${profile.username} ${profile.email} ${profile.role}`)
   );
-
-  const selectedProfileOrders = selectedProfileId
-    ? orders.filter((order) => order.user_id === selectedProfileId)
-    : [];
 
   if (loading || !allowed) {
     return (
@@ -591,633 +519,588 @@ export default function AdminPage() {
   return (
     <PageShell
       title="Admin Panel"
-      subtitle="Manage requests, orders, users, credits, products, and account tracking."
+      subtitle="Review requests, create orders, manage users, update credits, and chat with customers."
       rightAction={
-        <button
-          onClick={logout}
-          className="rounded-xl bg-zinc-800 px-4 py-2 text-sm hover:bg-zinc-700"
-        >
-          Logout
-        </button>
+        <div className="flex flex-wrap gap-3">
+          <Link
+            href="/dashboard"
+            className="rounded-xl border border-zinc-700 px-4 py-2 text-sm font-semibold text-zinc-200 hover:bg-zinc-900"
+          >
+            User Dashboard
+          </Link>
+
+          <button
+            onClick={logout}
+            className="rounded-xl bg-zinc-800 px-4 py-2 text-sm hover:bg-zinc-700"
+          >
+            Logout
+          </button>
+        </div>
       }
     >
-      <div className="grid gap-4 md:grid-cols-6">
+      <section className="grid gap-4 md:grid-cols-5">
         <StatCard label="Users" value={profiles.length} />
-        <StatCard label="Active Orders" value={activeOrders.length} />
-        <StatCard label="Pending Requests" value={filteredRequests.length} />
+        <StatCard label="Pending Requests" value={pendingRequests.length} />
+        <StatCard label="Active Orders" value={visibleOrders.length} />
         <StatCard label="Completed" value={completedOrders.length} />
-        <StatCard label="Rejected" value={rejectedOrders.length} danger />
-        <StatCard label="Archived" value={archivedOrders.length} highlight />
-      </div>
+        <StatCard label="Processed Requests" value={processedRequests.length} />
+      </section>
 
-      <Panel
-        title="Assign New Order"
-        subtitle="Create a new active order and assign it to a tracked user."
-      >
-        <form onSubmit={assignOrder} className="mt-5 grid gap-4">
-          <div className="grid gap-4 md:grid-cols-2">
-            <select
-              className="rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
-              value={selectedUserId}
-              onChange={(e) => setSelectedUserId(e.target.value)}
-            >
-              <option value="">Select user</option>
-              {profiles
-                .filter((profile) => profile.role !== "admin")
-                .map((profile) => (
-                  <option key={profile.id} value={profile.id}>
-                    {profile.username || "No username"} • {profile.email}
-                  </option>
-                ))}
-            </select>
+      <section className="mt-8 flex flex-wrap gap-2">
+        <TabButton
+          label="Overview"
+          active={activeTab === "overview"}
+          onClick={() => setActiveTab("overview")}
+        />
+        <TabButton
+          label={`Requests (${pendingRequests.length})`}
+          active={activeTab === "requests"}
+          onClick={() => setActiveTab("requests")}
+        />
+        <TabButton
+          label={`Orders (${visibleOrders.length})`}
+          active={activeTab === "orders"}
+          onClick={() => setActiveTab("orders")}
+        />
+        <TabButton
+          label={`Users (${profiles.length})`}
+          active={activeTab === "users"}
+          onClick={() => setActiveTab("users")}
+        />
+      </section>
 
-            <select
-              className="rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
-              value={serviceType}
-              onChange={(e) => setServiceType(e.target.value)}
-            >
-              <option>Rank Boost</option>
-              <option>Trophy Boost</option>
-              <option>Prestige Icon</option>
-              <option>Coaching</option>
-              <option>Account Purchase</option>
-              <option>Exclusive Pins</option>
-              <option>Special Offer</option>
-              <option>Custom Request</option>
-            </select>
-          </div>
+      <section className="mt-6 grid gap-4 md:grid-cols-2">
+        <input
+          className="rounded-xl bg-zinc-800 p-3 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
+          placeholder="Search user, email, service, notes, status..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
 
-          <div className="grid gap-4 md:grid-cols-2">
-            <input
-              className="rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
-              placeholder="Current rank / current value"
-              value={currentRank}
-              onChange={(e) => setCurrentRank(e.target.value)}
+        <select
+          className="rounded-xl bg-zinc-800 p-3 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+        >
+          <option value="all">All order statuses</option>
+          {orderStatuses.map((status) => (
+            <option key={status} value={status}>
+              {status.replace("_", " ")}
+            </option>
+          ))}
+        </select>
+      </section>
+
+      {activeTab === "overview" && (
+        <section className="mt-8 grid gap-6 lg:grid-cols-2">
+          <Panel title="Create / Assign Manual Order">
+            <ManualOrderForm
+              profiles={profiles}
+              selectedUserId={selectedUserId}
+              setSelectedUserId={setSelectedUserId}
+              serviceType={serviceType}
+              setServiceType={setServiceType}
+              currentRank={currentRank}
+              setCurrentRank={setCurrentRank}
+              targetRank={targetRank}
+              setTargetRank={setTargetRank}
+              notes={notes}
+              setNotes={setNotes}
+              createManualOrder={createManualOrder}
             />
+          </Panel>
 
-            <input
-              className="rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
-              placeholder="Target rank / target value"
-              value={targetRank}
-              onChange={(e) => setTargetRank(e.target.value)}
-            />
-          </div>
+          <Panel title="Incoming Requests">
+            <div className="mt-5 grid gap-4">
+              {pendingRequests.slice(0, 3).map((request) => (
+                <RequestCard
+                  key={request.id}
+                  request={request}
+                  userLabel={getUserLabel(request.user_id)}
+                  adminNote={adminNotes[request.id] ?? ""}
+                  setAdminNote={(value) =>
+                    setAdminNotes((prev) => ({
+                      ...prev,
+                      [request.id]: value,
+                    }))
+                  }
+                  formatDate={formatDate}
+                  onConvert={() => convertRequestToOrder(request)}
+                  onReject={() => rejectRequest(request.id)}
+                  onDelete={() => deleteRequest(request.id)}
+                />
+              ))}
 
-          <textarea
-            className="min-h-24 rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
-            placeholder="Admin notes"
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
+              {pendingRequests.length === 0 && (
+                <EmptyState text="No pending requests." />
+              )}
+
+              {pendingRequests.length > 3 && (
+                <button
+                  onClick={() => setActiveTab("requests")}
+                  className="rounded-xl bg-zinc-800 px-4 py-3 text-sm font-semibold hover:bg-zinc-700"
+                >
+                  View all requests
+                </button>
+              )}
+            </div>
+          </Panel>
+        </section>
+      )}
+
+      {activeTab === "requests" && (
+        <section className="mt-8">
+          <SectionHeader
+            title="Pending Requests"
+            subtitle="Accepting converts the request into an order. Rejected or converted requests leave this list."
           />
 
-          <button className="rounded-xl bg-yellow-400 p-3 font-bold text-black hover:bg-yellow-300">
-            Assign Order
-          </button>
-        </form>
-      </Panel>
-
-      <Panel
-        title="Incoming Requests"
-        subtitle="Accept creates an order and removes the request from this list."
-      >
-        <input
-          className="mt-5 w-full rounded-xl bg-zinc-800 p-3 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
-          placeholder="Search requests by username, email, service, rank, or notes..."
-          value={requestSearch}
-          onChange={(e) => setRequestSearch(e.target.value)}
-        />
-
-        <div className="mt-5 grid gap-5">
-          {filteredRequests.length === 0 && (
-            <EmptyState text="No pending incoming requests found." />
-          )}
-
-          {filteredRequests.map((request) => (
-            <div
-              key={request.id}
-              className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-5"
-            >
-              <div className="flex flex-col justify-between gap-5 md:flex-row">
-                <div>
-                  <div className="flex flex-wrap items-center gap-3">
-                    <p className="text-lg font-bold">{request.service_type}</p>
-                    <StatusBadge status={request.status} />
-                  </div>
-
-                  <p className="mt-2 text-sm text-zinc-400">
-                    User: {getUserLabel(request.user_id)}
-                  </p>
-
-                  <p className="text-sm text-zinc-400">
-                    {request.current_rank || "N/A"} →{" "}
-                    {request.target_rank || "N/A"}
-                  </p>
-
-                  <p className="mt-3 whitespace-pre-wrap text-sm text-zinc-300">
-                    Notes: {request.notes || "None"}
-                  </p>
-
-                  <DateGrid
-                    createdAt={request.created_at}
-                    updatedAt={request.updated_at}
-                    completedAt={null}
-                    formatDate={formatDate}
-                  />
-                </div>
-
-                <StatusCard label="Request Status" status={request.status} />
-              </div>
-
-              <div className="mt-5 flex flex-wrap gap-2">
-                <button
-                  onClick={() => acceptRequestAndCreateOrder(request)}
-                  className="rounded-xl bg-green-400 px-3 py-2 text-sm font-bold text-black hover:bg-green-300"
-                >
-                  Accept + Create Order
-                </button>
-
-                <button
-                  onClick={() => rejectRequest(request)}
-                  className="rounded-xl bg-red-500 px-3 py-2 text-sm font-bold text-white hover:bg-red-400"
-                >
-                  Reject + Remove
-                </button>
-
-                <button
-                  onClick={() => convertRequestToOrder(request)}
-                  className="rounded-xl bg-yellow-400 px-3 py-2 text-sm font-bold text-black hover:bg-yellow-300"
-                >
-                  Convert to Pending Order
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      </Panel>
-
-      <AdminProductManager />
-
-      <Panel
-        title="Users & Credits"
-        subtitle="Search users, edit usernames, update credits, and view each user's order history."
-      >
-        <input
-          className="mt-5 w-full rounded-xl bg-zinc-800 p-3 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
-          placeholder="Search user by username, email, or role..."
-          value={userSearch}
-          onChange={(e) => setUserSearch(e.target.value)}
-        />
-
-        <div className="mt-5 grid gap-4">
-          {filteredProfiles.length === 0 && (
-            <EmptyState text="No users found." />
-          )}
-
-          {filteredProfiles.map((profile) => (
-            <div
-              key={profile.id}
-              className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-5"
-            >
-              <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-                <div>
-                  <p className="font-semibold">
-                    {profile.username || "No username"}
-                  </p>
-                  <p className="mt-1 text-sm text-zinc-400">
-                    {profile.email}
-                  </p>
-                  <p className="mt-1 text-sm text-zinc-500">
-                    Role: {profile.role}
-                  </p>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-3">
-                  <input
-                    className="w-40 rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
-                    placeholder="Username"
-                    value={usernameInputs[profile.id] ?? ""}
-                    onChange={(e) =>
-                      setUsernameInputs((prev) => ({
-                        ...prev,
-                        [profile.id]: e.target.value,
-                      }))
-                    }
-                  />
-
-                  <button
-                    onClick={() => updateUsername(profile.id)}
-                    className="rounded-xl bg-zinc-800 px-4 py-3 text-sm font-semibold hover:bg-zinc-700"
-                  >
-                    Save Name
-                  </button>
-
-                  <input
-                    className="w-32 rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={profile.credits ?? 0}
-                    onChange={(e) =>
-                      updateCredits(profile.id, Number(e.target.value))
-                    }
-                  />
-
-                  <span className="text-sm text-zinc-400">credits</span>
-
-                  <button
-                    onClick={() => setSelectedProfileId(profile.id)}
-                    className="rounded-xl bg-yellow-400 px-4 py-3 text-sm font-bold text-black hover:bg-yellow-300"
-                  >
-                    View History
-                  </button>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </Panel>
-
-      {selectedProfile && (
-        <Panel
-          title={`Profile History: ${
-            selectedProfile.username || selectedProfile.email
-          }`}
-          subtitle="Admin view of this user's active, completed, rejected, and archived orders."
-        >
-          <button
-            onClick={() => setSelectedProfileId("")}
-            className="mt-4 rounded-xl bg-zinc-800 px-4 py-2 text-sm hover:bg-zinc-700"
-          >
-            Close Profile History
-          </button>
-
-          <div className="mt-5 grid gap-5">
-            {selectedProfileOrders.length === 0 && (
-              <EmptyState text="This user has no orders yet." />
+          <div className="mt-6 grid gap-5">
+            {filteredRequests.length === 0 && (
+              <EmptyState text="No matching pending requests." />
             )}
 
-            {selectedProfileOrders.map((order) => (
-              <OrderCard
-                key={order.id}
-                order={order}
-                userLabel={getUserLabel(order.user_id)}
-                messages={messages}
-                currentUserId={currentUserId}
-                chatInputs={chatInputs}
-                setChatInputs={setChatInputs}
-                sendAdminMessage={sendAdminMessage}
-                updateStatus={updateStatus}
-                updateOrderDetails={updateOrderDetails}
-                deleteOrder={deleteOrder}
-                archiveCompletedOrder={archiveCompletedOrder}
-                restoreArchivedOrder={restoreArchivedOrder}
+            {filteredRequests.map((request) => (
+              <RequestCard
+                key={request.id}
+                request={request}
+                userLabel={getUserLabel(request.user_id)}
+                adminNote={adminNotes[request.id] ?? ""}
+                setAdminNote={(value) =>
+                  setAdminNotes((prev) => ({
+                    ...prev,
+                    [request.id]: value,
+                  }))
+                }
                 formatDate={formatDate}
-                showArchiveControls
+                onConvert={() => convertRequestToOrder(request)}
+                onReject={() => rejectRequest(request.id)}
+                onDelete={() => deleteRequest(request.id)}
               />
             ))}
           </div>
-        </Panel>
-      )}
 
-      <Panel
-        title="Active Orders"
-        subtitle="Search, filter, edit, delete, update status, chat, and archive completed orders."
-      >
-        <div className="mt-5 grid gap-4 md:grid-cols-2">
-          <input
-            className="rounded-xl bg-zinc-800 p-3 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
-            placeholder="Search orders by username, email, service, rank, notes, or status..."
-            value={orderSearch}
-            onChange={(e) => setOrderSearch(e.target.value)}
+          <SectionHeader
+            title="Processed Requests"
+            subtitle="Rejected and converted requests are kept here for reference."
+            className="mt-10"
           />
 
-          <select
-            className="rounded-xl bg-zinc-800 p-3 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-          >
-            <option value="all">All statuses</option>
-            <option value="pending">Pending</option>
-            <option value="accepted">Accepted</option>
-            <option value="rejected">Rejected</option>
-            <option value="in_progress">In Progress</option>
-            <option value="completed">Completed</option>
-            <option value="cancelled">Cancelled</option>
-          </select>
-        </div>
+          <div className="mt-6 grid gap-5">
+            {processedRequests.length === 0 && (
+              <EmptyState text="No processed requests yet." />
+            )}
 
-        <div className="mt-5 grid gap-5">
-          {filteredOrders.length === 0 && (
-            <EmptyState text="No matching active orders found." />
-          )}
+            {processedRequests.map((request) => (
+              <ProcessedRequestCard
+                key={request.id}
+                request={request}
+                userLabel={getUserLabel(request.user_id)}
+                formatDate={formatDate}
+                onDelete={() => deleteRequest(request.id)}
+              />
+            ))}
+          </div>
+        </section>
+      )}
 
-          {filteredOrders.map((order) => (
-            <OrderCard
-              key={order.id}
-              order={order}
-              userLabel={getUserLabel(order.user_id)}
-              messages={messages}
-              currentUserId={currentUserId}
-              chatInputs={chatInputs}
-              setChatInputs={setChatInputs}
-              sendAdminMessage={sendAdminMessage}
-              updateStatus={updateStatus}
-              updateOrderDetails={updateOrderDetails}
-              deleteOrder={deleteOrder}
-              archiveCompletedOrder={archiveCompletedOrder}
-              restoreArchivedOrder={restoreArchivedOrder}
-              formatDate={formatDate}
-              showArchiveControls
-            />
-          ))}
-        </div>
-      </Panel>
+      {activeTab === "orders" && (
+        <section className="mt-8">
+          <SectionHeader
+            title="Orders"
+            subtitle="Edit, update status, archive, delete, and chat with users."
+          />
+
+          <div className="mt-6 grid gap-5">
+            {filteredOrders.length === 0 && (
+              <EmptyState text="No matching active admin orders." />
+            )}
+
+            {filteredOrders.map((order) => (
+              <OrderCard
+                key={order.id}
+                order={order}
+                setOrders={setOrders}
+                userLabel={getUserLabel(order.user_id)}
+                messages={messages}
+                currentUserId={currentUserId}
+                chatInput={chatInputs[order.id] ?? ""}
+                setChatInput={(value) =>
+                  setChatInputs((prev) => ({ ...prev, [order.id]: value }))
+                }
+                sendMessage={() => sendAdminMessage(order.id)}
+                updateStatus={(status) => updateOrderStatus(order, status)}
+                saveOrder={saveOrder}
+                deleteOrder={() => deleteOrder(order.id)}
+                archiveOrder={() => archiveOrder(order.id)}
+                formatDate={formatDate}
+              />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {activeTab === "users" && (
+        <section className="mt-8">
+          <SectionHeader
+            title="Users"
+            subtitle="Update usernames and credits. Use usernames to track customers more easily."
+          />
+
+          <div className="mt-6 grid gap-5">
+            {filteredProfiles.map((profile) => (
+              <UserCard
+                key={profile.id}
+                profile={profile}
+                orders={orders.filter((order) => order.user_id === profile.id)}
+                usernameValue={usernameInputs[profile.id] ?? ""}
+                setUsernameValue={(value) =>
+                  setUsernameInputs((prev) => ({
+                    ...prev,
+                    [profile.id]: value,
+                  }))
+                }
+                creditValue={creditInputs[profile.id] ?? "0"}
+                setCreditValue={(value) =>
+                  setCreditInputs((prev) => ({
+                    ...prev,
+                    [profile.id]: value,
+                  }))
+                }
+                updateUsername={() => updateUsername(profile.id)}
+                updateCredits={() => updateCredits(profile.id)}
+              />
+            ))}
+          </div>
+        </section>
+      )}
     </PageShell>
   );
 }
 
-function StatCard({
-  label,
-  value,
-  highlight = false,
-  danger = false,
+function ManualOrderForm({
+  profiles,
+  selectedUserId,
+  setSelectedUserId,
+  serviceType,
+  setServiceType,
+  currentRank,
+  setCurrentRank,
+  targetRank,
+  setTargetRank,
+  notes,
+  setNotes,
+  createManualOrder,
 }: {
-  label: string;
-  value: number;
-  highlight?: boolean;
-  danger?: boolean;
+  profiles: Profile[];
+  selectedUserId: string;
+  setSelectedUserId: (value: string) => void;
+  serviceType: string;
+  setServiceType: (value: string) => void;
+  currentRank: string;
+  setCurrentRank: (value: string) => void;
+  targetRank: string;
+  setTargetRank: (value: string) => void;
+  notes: string;
+  setNotes: (value: string) => void;
+  createManualOrder: (e: React.FormEvent) => Promise<void>;
+}) {
+  return (
+    <form onSubmit={createManualOrder} className="mt-5 grid gap-4">
+      <select
+        className="rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
+        value={selectedUserId}
+        onChange={(e) => setSelectedUserId(e.target.value)}
+      >
+        <option value="">Select user</option>
+        {profiles
+          .filter((profile) => profile.role !== "admin")
+          .map((profile) => (
+            <option key={profile.id} value={profile.id}>
+              {profile.username || "No username"} • {profile.email}
+            </option>
+          ))}
+      </select>
+
+      <input
+        className="rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
+        placeholder="Service type"
+        value={serviceType}
+        onChange={(e) => setServiceType(e.target.value)}
+      />
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <input
+          className="rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
+          placeholder="Current"
+          value={currentRank}
+          onChange={(e) => setCurrentRank(e.target.value)}
+        />
+
+        <input
+          className="rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
+          placeholder="Target"
+          value={targetRank}
+          onChange={(e) => setTargetRank(e.target.value)}
+        />
+      </div>
+
+      <textarea
+        className="min-h-28 rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
+        placeholder="Order notes"
+        value={notes}
+        onChange={(e) => setNotes(e.target.value)}
+      />
+
+      <button className="rounded-xl bg-yellow-400 p-3 font-bold text-black hover:bg-yellow-300">
+        Assign Order
+      </button>
+    </form>
+  );
+}
+
+function RequestCard({
+  request,
+  userLabel,
+  adminNote,
+  setAdminNote,
+  formatDate,
+  onConvert,
+  onReject,
+  onDelete,
+}: {
+  request: OrderRequest;
+  userLabel: string;
+  adminNote: string;
+  setAdminNote: (value: string) => void;
+  formatDate: (date: string | null) => string;
+  onConvert: () => void;
+  onReject: () => void;
+  onDelete: () => void;
 }) {
   return (
     <div className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-6">
-      <p className="text-sm text-zinc-400">{label}</p>
-      <h2
-        className={`mt-2 text-4xl font-bold ${
-          danger
-            ? "text-red-400"
-            : highlight
-            ? "text-yellow-400"
-            : "text-white"
-        }`}
-      >
-        {value}
-      </h2>
-    </div>
-  );
-}
+      <div className="flex flex-col justify-between gap-4 md:flex-row md:items-start">
+        <div>
+          <div className="flex flex-wrap items-center gap-3">
+            <h3 className="text-xl font-bold">{request.service_type}</h3>
+            <StatusBadge status={request.status} />
+          </div>
 
-function Panel({
-  title,
-  subtitle,
-  children,
-}: {
-  title: string;
-  subtitle: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="mt-8 rounded-2xl border border-zinc-800 bg-zinc-900/80 p-6">
-      <h2 className="text-xl font-bold">{title}</h2>
-      <p className="mt-1 text-sm text-zinc-400">{subtitle}</p>
-      {children}
-    </div>
-  );
-}
+          <p className="mt-2 text-sm text-zinc-400">User: {userLabel}</p>
+          <p className="mt-1 text-sm text-zinc-400">
+            {request.current_rank || "N/A"} → {request.target_rank || "N/A"}
+          </p>
+          <p className="mt-1 text-xs text-zinc-500">
+            Submitted: {formatDate(request.created_at)}
+          </p>
+        </div>
 
-function EmptyState({ text }: { text: string }) {
-  return (
-    <div className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-6 text-zinc-400">
-      {text}
-    </div>
-  );
-}
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={onConvert}
+            className="rounded-xl bg-green-500 px-4 py-2 text-sm font-bold text-black hover:bg-green-400"
+          >
+            Accept → Order
+          </button>
 
-function StatusCard({ label, status }: { label: string; status: string }) {
-  return (
-    <div className="h-fit rounded-xl border border-zinc-800 bg-zinc-900 p-4">
-      <p className="text-xs text-zinc-500">{label}</p>
-      <div className="mt-2">
-        <StatusBadge status={status} />
+          <button
+            onClick={onReject}
+            className="rounded-xl bg-red-500 px-4 py-2 text-sm font-bold text-white hover:bg-red-400"
+          >
+            Reject
+          </button>
+
+          <button
+            onClick={onDelete}
+            className="rounded-xl bg-zinc-800 px-4 py-2 text-sm hover:bg-zinc-700"
+          >
+            Delete
+          </button>
+        </div>
       </div>
+
+      <div className="mt-5 rounded-xl border border-zinc-800 bg-zinc-950/80 p-4">
+        <h4 className="font-semibold">Request Details</h4>
+        <p className="mt-3 whitespace-pre-wrap text-sm text-zinc-400">
+          {request.notes || "No notes."}
+        </p>
+      </div>
+
+      <textarea
+        className="mt-4 min-h-20 w-full rounded-xl bg-zinc-800 p-3 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
+        placeholder="Admin note for user..."
+        value={adminNote}
+        onChange={(e) => setAdminNote(e.target.value)}
+      />
     </div>
   );
 }
 
-function DateGrid({
-  createdAt,
-  updatedAt,
-  completedAt,
+function ProcessedRequestCard({
+  request,
+  userLabel,
   formatDate,
+  onDelete,
 }: {
-  createdAt: string;
-  updatedAt: string | null;
-  completedAt: string | null;
+  request: OrderRequest;
+  userLabel: string;
   formatDate: (date: string | null) => string;
+  onDelete: () => void;
 }) {
   return (
-    <div className="mt-4 grid gap-3 text-sm text-zinc-400 md:grid-cols-3">
-      <DateBox label="Created" value={formatDate(createdAt)} />
-      <DateBox label="Last Updated" value={formatDate(updatedAt)} />
-      <DateBox label="Completed" value={formatDate(completedAt)} />
-    </div>
-  );
-}
+    <div className="rounded-2xl border border-zinc-800 bg-zinc-900/50 p-5">
+      <div className="flex flex-col justify-between gap-4 md:flex-row md:items-start">
+        <div>
+          <div className="flex flex-wrap items-center gap-3">
+            <h3 className="font-bold">{request.service_type}</h3>
+            <StatusBadge status={request.status} />
+          </div>
 
-function DateBox({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-xl border border-zinc-800 bg-zinc-900 p-3">
-      <p className="text-xs text-zinc-500">{label}</p>
-      <p className="mt-1">{value}</p>
+          <p className="mt-2 text-sm text-zinc-400">User: {userLabel}</p>
+          <p className="mt-1 text-xs text-zinc-500">
+            Updated: {formatDate(request.updated_at || request.created_at)}
+          </p>
+
+          {request.admin_notes && (
+            <p className="mt-3 text-sm text-zinc-300">
+              Admin note: {request.admin_notes}
+            </p>
+          )}
+        </div>
+
+        <button
+          onClick={onDelete}
+          className="rounded-xl bg-zinc-800 px-4 py-2 text-sm hover:bg-zinc-700"
+        >
+          Delete
+        </button>
+      </div>
     </div>
   );
 }
 
 function OrderCard({
   order,
+  setOrders,
   userLabel,
   messages,
   currentUserId,
-  chatInputs,
-  setChatInputs,
-  sendAdminMessage,
+  chatInput,
+  setChatInput,
+  sendMessage,
   updateStatus,
-  updateOrderDetails,
+  saveOrder,
   deleteOrder,
-  archiveCompletedOrder,
-  restoreArchivedOrder,
+  archiveOrder,
   formatDate,
-  showArchiveControls,
 }: {
   order: Order;
+  setOrders: React.Dispatch<React.SetStateAction<Order[]>>;
   userLabel: string;
   messages: Message[];
   currentUserId: string;
-  chatInputs: Record<string, string>;
-  setChatInputs: React.Dispatch<React.SetStateAction<Record<string, string>>>;
-  sendAdminMessage: (orderId: string) => Promise<void>;
-  updateStatus: (orderId: string, status: string) => Promise<void>;
-  updateOrderDetails: (orderId: string, data: OrderEditData) => Promise<void>;
-  deleteOrder: (order: Order) => Promise<void>;
-  archiveCompletedOrder: (orderId: string) => Promise<void>;
-  restoreArchivedOrder: (orderId: string) => Promise<void>;
+  chatInput: string;
+  setChatInput: (value: string) => void;
+  sendMessage: () => void;
+  updateStatus: (status: string) => void;
+  saveOrder: (order: Order) => void;
+  deleteOrder: () => void;
+  archiveOrder: () => void;
   formatDate: (date: string | null) => string;
-  showArchiveControls?: boolean;
 }) {
-  const [editing, setEditing] = useState(false);
-  const [editData, setEditData] = useState<OrderEditData>({
-    service_type: order.service_type,
-    current_rank: order.current_rank ?? "",
-    target_rank: order.target_rank ?? "",
-    notes: order.notes ?? "",
-    status: order.status,
-  });
-
   const orderMessages = messages.filter(
     (message) => message.order_id === order.id
   );
 
-  async function saveEdit() {
-    await updateOrderDetails(order.id, editData);
-    setEditing(false);
+  function updateLocalField(key: keyof Order, value: string | null) {
+    setOrders((prev) =>
+      prev.map((item) =>
+        item.id === order.id
+          ? {
+              ...item,
+              [key]: value,
+            }
+          : item
+      )
+    );
   }
 
   return (
-    <div className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-5">
+    <div className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-6">
       <div className="flex flex-col justify-between gap-5 md:flex-row md:items-start">
-        <div className="w-full">
+        <div>
           <div className="flex flex-wrap items-center gap-3">
-            <p className="text-lg font-bold">{order.service_type}</p>
+            <h3 className="text-xl font-bold">{order.service_type}</h3>
             <StatusBadge status={order.status} />
-
-            {order.admin_archived && (
-              <span className="rounded-full border border-zinc-600 bg-zinc-800 px-3 py-1 text-xs text-zinc-300">
-                archived
-              </span>
-            )}
           </div>
 
           <p className="mt-2 text-sm text-zinc-400">User: {userLabel}</p>
-
-          <p className="text-sm text-zinc-400">
-            {order.current_rank || "N/A"} → {order.target_rank || "N/A"}
+          <p className="mt-1 text-xs text-zinc-500">
+            Created: {formatDate(order.created_at)} • Updated:{" "}
+            {formatDate(order.updated_at)}
           </p>
-
-          <p className="mt-3 whitespace-pre-wrap text-sm text-zinc-300">
-            Notes: {order.notes || "None"}
-          </p>
-
-          <DateGrid
-            createdAt={order.created_at}
-            updatedAt={order.updated_at}
-            completedAt={order.completed_at}
-            formatDate={formatDate}
-          />
         </div>
 
-        <StatusCard label="Current Status" status={order.status} />
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => saveOrder(order)}
+            className="rounded-xl bg-yellow-400 px-4 py-2 text-sm font-bold text-black hover:bg-yellow-300"
+          >
+            Save
+          </button>
+
+          <button
+            onClick={archiveOrder}
+            className="rounded-xl bg-zinc-800 px-4 py-2 text-sm hover:bg-zinc-700"
+          >
+            Archive
+          </button>
+
+          <button
+            onClick={deleteOrder}
+            className="rounded-xl bg-red-500 px-4 py-2 text-sm font-bold text-white hover:bg-red-400"
+          >
+            Delete
+          </button>
+        </div>
       </div>
 
-      {editing && (
-        <div className="mt-5 rounded-2xl border border-yellow-400/30 bg-yellow-400/10 p-5">
-          <h4 className="font-bold text-yellow-300">Edit Order</h4>
+      <div className="mt-5 grid gap-4 md:grid-cols-3">
+        <input
+          className="rounded-xl bg-zinc-800 p-3 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
+          value={order.service_type}
+          onChange={(e) => updateLocalField("service_type", e.target.value)}
+          placeholder="Service type"
+        />
 
-          <div className="mt-4 grid gap-4 md:grid-cols-2">
-            <input
-              className="rounded-xl bg-zinc-900 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
-              placeholder="Service type"
-              value={editData.service_type}
-              onChange={(e) =>
-                setEditData((prev) => ({
-                  ...prev,
-                  service_type: e.target.value,
-                }))
-              }
-            />
+        <input
+          className="rounded-xl bg-zinc-800 p-3 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
+          value={order.current_rank ?? ""}
+          onChange={(e) => updateLocalField("current_rank", e.target.value)}
+          placeholder="Current"
+        />
 
-            <select
-              className="rounded-xl bg-zinc-900 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
-              value={editData.status}
-              onChange={(e) =>
-                setEditData((prev) => ({
-                  ...prev,
-                  status: e.target.value,
-                }))
-              }
-            >
-              <option value="pending">Pending</option>
-              <option value="accepted">Accepted</option>
-              <option value="rejected">Rejected</option>
-              <option value="in_progress">In Progress</option>
-              <option value="completed">Completed</option>
-              <option value="cancelled">Cancelled</option>
-            </select>
+        <input
+          className="rounded-xl bg-zinc-800 p-3 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
+          value={order.target_rank ?? ""}
+          onChange={(e) => updateLocalField("target_rank", e.target.value)}
+          placeholder="Target"
+        />
+      </div>
 
-            <input
-              className="rounded-xl bg-zinc-900 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
-              placeholder="Current value"
-              value={editData.current_rank}
-              onChange={(e) =>
-                setEditData((prev) => ({
-                  ...prev,
-                  current_rank: e.target.value,
-                }))
-              }
-            />
+      <textarea
+        className="mt-4 min-h-24 w-full rounded-xl bg-zinc-800 p-3 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
+        value={order.notes ?? ""}
+        onChange={(e) => updateLocalField("notes", e.target.value)}
+        placeholder="Order notes"
+      />
 
-            <input
-              className="rounded-xl bg-zinc-900 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
-              placeholder="Target value"
-              value={editData.target_rank}
-              onChange={(e) =>
-                setEditData((prev) => ({
-                  ...prev,
-                  target_rank: e.target.value,
-                }))
-              }
-            />
-
-            <textarea
-              className="min-h-24 rounded-xl bg-zinc-900 p-3 outline-none focus:ring-2 focus:ring-yellow-400 md:col-span-2"
-              placeholder="Notes"
-              value={editData.notes}
-              onChange={(e) =>
-                setEditData((prev) => ({
-                  ...prev,
-                  notes: e.target.value,
-                }))
-              }
-            />
-          </div>
-
-          <div className="mt-4 flex flex-wrap gap-2">
-            <button
-              onClick={saveEdit}
-              className="rounded-xl bg-yellow-400 px-4 py-2 text-sm font-bold text-black hover:bg-yellow-300"
-            >
-              Save Order
-            </button>
-
-            <button
-              onClick={() => setEditing(false)}
-              className="rounded-xl bg-zinc-800 px-4 py-2 text-sm hover:bg-zinc-700"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
-
-      <div className="mt-5 flex flex-wrap gap-2">
-        {[
-          "pending",
-          "accepted",
-          "rejected",
-          "in_progress",
-          "completed",
-          "cancelled",
-        ].map((status) => (
+      <div className="mt-4 flex flex-wrap gap-2">
+        {orderStatuses.map((status) => (
           <button
             key={status}
-            onClick={() => updateStatus(order.id, status)}
+            onClick={() => updateStatus(status)}
             className={`rounded-xl px-3 py-2 text-sm ${
               order.status === status
                 ? "bg-yellow-400 font-bold text-black"
@@ -1227,45 +1110,11 @@ function OrderCard({
             {status.replace("_", " ")}
           </button>
         ))}
-
-        <button
-          onClick={() => setEditing((prev) => !prev)}
-          className="rounded-xl bg-blue-500 px-3 py-2 text-sm font-bold text-white hover:bg-blue-400"
-        >
-          {editing ? "Close Edit" : "Edit Order"}
-        </button>
-
-        <button
-          onClick={() => deleteOrder(order)}
-          className="rounded-xl bg-red-700 px-3 py-2 text-sm font-bold text-white hover:bg-red-600"
-        >
-          Delete Order
-        </button>
-
-        {showArchiveControls &&
-          order.status === "completed" &&
-          !order.admin_archived && (
-            <button
-              onClick={() => archiveCompletedOrder(order.id)}
-              className="rounded-xl bg-red-500 px-3 py-2 text-sm font-bold text-white hover:bg-red-400"
-            >
-              Remove from Active
-            </button>
-          )}
-
-        {showArchiveControls && order.admin_archived && (
-          <button
-            onClick={() => restoreArchivedOrder(order.id)}
-            className="rounded-xl bg-blue-500 px-3 py-2 text-sm font-bold text-white hover:bg-blue-400"
-          >
-            Restore to Active
-          </button>
-        )}
       </div>
 
-      <div className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900/80 p-5">
+      <div className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-950/80 p-5">
         <div className="flex items-center justify-between">
-          <h4 className="font-semibold">Order Chat</h4>
+          <h4 className="font-semibold">Chat</h4>
           <p className="text-xs text-zinc-500">
             {orderMessages.length} message
             {orderMessages.length === 1 ? "" : "s"}
@@ -1295,23 +1144,186 @@ function OrderCard({
           <input
             className="flex-1 rounded-xl bg-zinc-800 p-3 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
             placeholder="Reply to user..."
-            value={chatInputs[order.id] ?? ""}
-            onChange={(e) =>
-              setChatInputs((prev) => ({
-                ...prev,
-                [order.id]: e.target.value,
-              }))
-            }
+            value={chatInput}
+            onChange={(e) => setChatInput(e.target.value)}
           />
 
           <button
-            onClick={() => sendAdminMessage(order.id)}
+            onClick={sendMessage}
             className="rounded-xl bg-yellow-400 px-5 py-2 text-sm font-bold text-black hover:bg-yellow-300"
           >
             Send
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function UserCard({
+  profile,
+  orders,
+  usernameValue,
+  setUsernameValue,
+  creditValue,
+  setCreditValue,
+  updateUsername,
+  updateCredits,
+}: {
+  profile: Profile;
+  orders: Order[];
+  usernameValue: string;
+  setUsernameValue: (value: string) => void;
+  creditValue: string;
+  setCreditValue: (value: string) => void;
+  updateUsername: () => void;
+  updateCredits: () => void;
+}) {
+  const completedCount = orders.filter(
+    (order) => order.status === "completed"
+  ).length;
+
+  return (
+    <div className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-6">
+      <div className="flex flex-col justify-between gap-5 lg:flex-row lg:items-start">
+        <div>
+          <p className="text-lg font-bold">{profile.email}</p>
+          <p className="mt-1 text-sm text-zinc-400">Role: {profile.role}</p>
+          <p className="mt-1 text-sm text-zinc-400">
+            Orders: {orders.length} • Completed: {completedCount}
+          </p>
+        </div>
+
+        <div className="grid gap-3 md:grid-cols-2">
+          <div className="flex gap-2">
+            <input
+              className="rounded-xl bg-zinc-800 p-3 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
+              value={usernameValue}
+              onChange={(e) => setUsernameValue(e.target.value)}
+              placeholder="Username"
+            />
+
+            <button
+              onClick={updateUsername}
+              className="rounded-xl bg-zinc-800 px-4 py-2 text-sm hover:bg-zinc-700"
+            >
+              Save
+            </button>
+          </div>
+
+          <div className="flex gap-2">
+            <input
+              className="rounded-xl bg-zinc-800 p-3 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
+              type="number"
+              min="0"
+              step="0.01"
+              value={creditValue}
+              onChange={(e) => setCreditValue(e.target.value)}
+              placeholder="Credits"
+            />
+
+            <button
+              onClick={updateCredits}
+              className="rounded-xl bg-yellow-400 px-4 py-2 text-sm font-bold text-black hover:bg-yellow-300"
+            >
+              Update
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {orders.length > 0 && (
+        <div className="mt-5 rounded-xl border border-zinc-800 bg-zinc-950/80 p-4">
+          <p className="font-semibold">Order History</p>
+
+          <div className="mt-3 grid gap-2">
+            {orders.slice(0, 5).map((order) => (
+              <div
+                key={order.id}
+                className="flex flex-col justify-between gap-2 rounded-xl bg-zinc-900 p-3 text-sm md:flex-row md:items-center"
+              >
+                <span>
+                  {order.service_type}: {order.current_rank || "N/A"} →{" "}
+                  {order.target_rank || "N/A"}
+                </span>
+                <StatusBadge status={order.status} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StatCard({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-6">
+      <p className="text-sm text-zinc-400">{label}</p>
+      <h2 className="mt-2 text-3xl font-bold text-yellow-400">{value}</h2>
+    </div>
+  );
+}
+
+function TabButton({
+  label,
+  active,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`rounded-xl px-4 py-2 text-sm font-semibold ${
+        active
+          ? "bg-yellow-400 text-black"
+          : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700 hover:text-white"
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
+
+function Panel({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-6">
+      <h2 className="text-xl font-bold">{title}</h2>
+      {children}
+    </div>
+  );
+}
+
+function SectionHeader({
+  title,
+  subtitle,
+  className = "",
+}: {
+  title: string;
+  subtitle: string;
+  className?: string;
+}) {
+  return (
+    <div className={className}>
+      <h2 className="text-2xl font-bold">{title}</h2>
+      <p className="mt-1 text-sm text-zinc-400">{subtitle}</p>
+    </div>
+  );
+}
+
+function EmptyState({ text }: { text: string }) {
+  return (
+    <div className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-8 text-center text-zinc-400">
+      {text}
     </div>
   );
 }
