@@ -83,6 +83,13 @@ const categoryIcons: Record<ProductCategory, string> = {
   market: "🛒",
 };
 
+const addListingLabels: Record<ProductCategory, string> = {
+  accounts: "Add Account Listing",
+  pins: "Add Pin Listing",
+  offers: "Add Offer Listing",
+  market: "Add Market Item",
+};
+
 const marketTypes = ["All", "In-game Items", "Finger Sleeves", "Keychains"];
 
 function buildWhatsAppUrl(product: Product) {
@@ -208,7 +215,7 @@ export default function MarketplacePage({
       alert(
         "Admins manage listings from the admin panel. Admins cannot submit purchase requests."
       );
-      router.push("/admin");
+      router.push("/admin#product-manager");
       return;
     }
 
@@ -472,15 +479,26 @@ export default function MarketplacePage({
                 )}
               </div>
 
-              <select
-                className="rounded-xl bg-zinc-800 p-3 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
-                value={sort}
-                onChange={(e) => setSort(e.target.value)}
-              >
-                <option value="recommended">Recommended</option>
-                <option value="lowest">Lowest Price</option>
-                <option value="highest">Highest Price</option>
-              </select>
+              <div className="flex flex-col gap-3 sm:flex-row">
+                {isAdmin && (
+                  <Link
+                    href="/admin#product-manager"
+                    className="rounded-xl bg-yellow-400 px-5 py-3 text-center text-sm font-bold text-black hover:bg-yellow-300"
+                  >
+                    {addListingLabels[category]}
+                  </Link>
+                )}
+
+                <select
+                  className="rounded-xl bg-zinc-800 p-3 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
+                  value={sort}
+                  onChange={(e) => setSort(e.target.value)}
+                >
+                  <option value="recommended">Recommended</option>
+                  <option value="lowest">Lowest Price</option>
+                  <option value="highest">Highest Price</option>
+                </select>
+              </div>
             </div>
 
             <div className="mt-8">
@@ -527,7 +545,16 @@ export default function MarketplacePage({
 
               {!loading && filteredProducts.length === 0 && (
                 <div className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-6 text-zinc-400">
-                  No listings found.
+                  <p>No listings found.</p>
+
+                  {isAdmin && (
+                    <Link
+                      href="/admin#product-manager"
+                      className="mt-4 inline-flex rounded-xl bg-yellow-400 px-5 py-3 text-sm font-bold text-black hover:bg-yellow-300"
+                    >
+                      {addListingLabels[category]}
+                    </Link>
+                  )}
                 </div>
               )}
             </div>
@@ -622,12 +649,21 @@ function ProductCard({
           </div>
 
           {isAdmin ? (
-            <Link
-              href="/admin"
-              className="rounded-xl bg-zinc-800 px-4 py-2 text-sm font-bold text-white hover:bg-zinc-700"
-            >
-              Manage
-            </Link>
+            <div className="flex flex-col gap-2">
+              <Link
+                href="/admin#product-manager"
+                className="rounded-xl bg-zinc-800 px-4 py-2 text-center text-sm font-bold text-white hover:bg-zinc-700"
+              >
+                Manage
+              </Link>
+
+              <Link
+                href="/admin#product-manager"
+                className="rounded-xl bg-yellow-400 px-4 py-2 text-center text-sm font-bold text-black hover:bg-yellow-300"
+              >
+                Add
+              </Link>
+            </div>
           ) : (
             <div className="flex flex-col gap-2">
               <button

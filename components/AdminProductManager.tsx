@@ -99,6 +99,26 @@ export default function AdminProductManager() {
 
   useEffect(() => {
     loadProducts();
+
+    const params = new URLSearchParams(window.location.search);
+    const category = params.get("category") as ProductCategory | null;
+
+    if (
+      category === "accounts" ||
+      category === "pins" ||
+      category === "offers" ||
+      category === "market"
+    ) {
+      setActiveCategory(category);
+      setForm((prev) => ({
+        ...prev,
+        category,
+        rank_icon_url:
+          category === "accounts" || category === "market"
+            ? ""
+            : prev.rank_icon_url,
+      }));
+    }
   }, []);
 
   async function loadProducts() {
@@ -137,7 +157,9 @@ export default function AdminProductManager() {
 
     if (category === "market") {
       const withoutDuplicateMarketType = baseTags.filter(
-        (tag) => tag.toLowerCase() !== form.market_type.toLowerCase()
+        (tag) =>
+          tag.toLowerCase() !== form.market_type.toLowerCase() &&
+          tag.toLowerCase() !== "market"
       );
 
       return ["Market", form.market_type, ...withoutDuplicateMarketType];
@@ -146,12 +168,29 @@ export default function AdminProductManager() {
     return baseTags;
   }
 
-  function resetForm() {
+  function resetForm(categoryOverride?: ProductCategory) {
+    const category = categoryOverride ?? activeCategory;
+
     setForm({
       ...emptyForm,
-      category: activeCategory,
+      category,
+      rank_icon_url: category === "accounts" || category === "market" ? "" : "",
     });
+
     setEditingId("");
+  }
+
+  function changeActiveCategory(category: ProductCategory) {
+    setActiveCategory(category);
+
+    setForm((prev) => ({
+      ...prev,
+      category,
+      rank_icon_url:
+        category === "accounts" || category === "market"
+          ? ""
+          : prev.rank_icon_url,
+    }));
   }
 
   function cleanFileName(fileName: string) {
@@ -230,11 +269,23 @@ export default function AdminProductManager() {
       return;
     }
 
+    if (!form.price.trim()) {
+      alert("Price is required.");
+      return;
+    }
+
+    const price = Number(form.price);
+
+    if (Number.isNaN(price) || price < 0) {
+      alert("Enter a valid price.");
+      return;
+    }
+
     const payload = {
       category: form.category,
       title: form.title.trim(),
       description: form.description.trim() || null,
-      price: Number(form.price || 0),
+      price,
       tags: parseTags(form.tags, form.category),
       image_url: form.image_url.trim() || null,
       video_url: form.video_url.trim() || null,
@@ -266,7 +317,7 @@ export default function AdminProductManager() {
       }
     }
 
-    resetForm();
+    resetForm(form.category);
     await loadProducts();
   }
 
@@ -298,6 +349,11 @@ export default function AdminProductManager() {
           : product.rank_icon_url ?? "",
       delivery_time: product.delivery_time ?? "Manual review",
       is_active: product.is_active ?? true,
+    });
+
+    document.getElementById("product-manager")?.scrollIntoView({
+      behavior: "smooth",
+      block: "start",
     });
   }
 
@@ -345,6 +401,7 @@ export default function AdminProductManager() {
       product.tags?.join(" "),
       product.category,
       product.price?.toString(),
+      product.delivery_time,
     ]
       .join(" ")
       .toLowerCase();
@@ -356,7 +413,10 @@ export default function AdminProductManager() {
   });
 
   return (
-    <div className="mt-8 rounded-2xl border border-zinc-800 bg-zinc-900/80 p-6">
+    <div
+      id="product-manager"
+      className="mt-8 scroll-mt-8 rounded-2xl border border-zinc-800 bg-zinc-900/80 p-6"
+    >
       <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
         <div>
           <h2 className="text-xl font-bold">Product Manager</h2>
@@ -379,17 +439,7 @@ export default function AdminProductManager() {
           (category) => (
             <button
               key={category}
-              onClick={() => {
-                setActiveCategory(category);
-                setForm((prev) => ({
-                  ...prev,
-                  category,
-                  rank_icon_url:
-                    category === "accounts" || category === "market"
-                      ? ""
-                      : prev.rank_icon_url,
-                }));
-              }}
+              onClick={() => changeActiveCategory(category)}
               className={`rounded-xl px-4 py-2 text-sm font-semibold ${
                 activeCategory === category
                   ? "bg-yellow-400 text-black"
@@ -420,7 +470,7 @@ export default function AdminProductManager() {
           {editingId && (
             <button
               type="button"
-              onClick={resetForm}
+              onClick={() => resetForm()}
               className="rounded-xl border border-zinc-700 px-4 py-2 text-sm hover:bg-zinc-900"
             >
               Cancel Edit
@@ -436,9 +486,10 @@ export default function AdminProductManager() {
             <select
               className="rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
               value={form.category}
-              onChange={(e) =>
-                updateForm("category", e.target.value as ProductCategory)
-              }
+              onChange={(e) => {
+                const nextCategory = e.target.value as ProductCategory;
+                changeActiveCategory(nextCategory);
+              }}
             >
               <option value="market">Market</option>
               <option value="accounts">Accounts</option>
@@ -638,7 +689,7 @@ export default function AdminProductManager() {
 
           <button
             type="button"
-            onClick={resetForm}
+            onClick={() => resetForm()}
             className="rounded-xl border border-zinc-700 px-5 py-3 font-bold text-white hover:bg-zinc-900"
           >
             Reset
