@@ -56,6 +56,13 @@ const categoryLabels: Record<ProductCategory, string> = {
   market: "Market",
 };
 
+const categoryDescriptions: Record<ProductCategory, string> = {
+  accounts: "Create account-style listing cards with images, title, description, price, and request button.",
+  pins: "Create pin listings with image, optional icon, title, description, and price.",
+  offers: "Create bundle or special offer listings.",
+  market: "Create physical or digital market listings such as in-game item requests, finger sleeves, and keychains.",
+};
+
 const categoryIcons: Record<ProductCategory, string> = {
   accounts: "🎮",
   pins: "📌",
@@ -83,6 +90,15 @@ function inferMarketType(tags: string[] | null): MarketType {
   return "Finger Sleeves";
 }
 
+function isProductCategory(value: string | null): value is ProductCategory {
+  return (
+    value === "accounts" ||
+    value === "pins" ||
+    value === "offers" ||
+    value === "market"
+  );
+}
+
 export default function AdminProductManager() {
   const supabase = useMemo(() => createClient(), []);
 
@@ -101,14 +117,9 @@ export default function AdminProductManager() {
     loadProducts();
 
     const params = new URLSearchParams(window.location.search);
-    const category = params.get("category") as ProductCategory | null;
+    const category = params.get("category");
 
-    if (
-      category === "accounts" ||
-      category === "pins" ||
-      category === "offers" ||
-      category === "market"
-    ) {
+    if (isProductCategory(category)) {
       setActiveCategory(category);
       setForm((prev) => ({
         ...prev,
@@ -118,6 +129,13 @@ export default function AdminProductManager() {
             ? ""
             : prev.rank_icon_url,
       }));
+
+      setTimeout(() => {
+        document.getElementById("product-manager")?.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        });
+      }, 100);
     }
   }, []);
 
@@ -174,7 +192,7 @@ export default function AdminProductManager() {
     setForm({
       ...emptyForm,
       category,
-      rank_icon_url: category === "accounts" || category === "market" ? "" : "",
+      rank_icon_url: "",
     });
 
     setEditingId("");
@@ -182,6 +200,7 @@ export default function AdminProductManager() {
 
   function changeActiveCategory(category: ProductCategory) {
     setActiveCategory(category);
+    setSearch("");
 
     setForm((prev) => ({
       ...prev,
@@ -191,6 +210,10 @@ export default function AdminProductManager() {
           ? ""
           : prev.rank_icon_url,
     }));
+
+    const url = new URL(window.location.href);
+    url.searchParams.set("category", category);
+    window.history.replaceState({}, "", url.toString());
   }
 
   function cleanFileName(fileName: string) {
@@ -269,6 +292,11 @@ export default function AdminProductManager() {
       return;
     }
 
+    if (!form.description.trim()) {
+      alert("Description is required.");
+      return;
+    }
+
     if (!form.price.trim()) {
       alert("Price is required.");
       return;
@@ -284,7 +312,7 @@ export default function AdminProductManager() {
     const payload = {
       category: form.category,
       title: form.title.trim(),
-      description: form.description.trim() || null,
+      description: form.description.trim(),
       price,
       tags: parseTags(form.tags, form.category),
       image_url: form.image_url.trim() || null,
@@ -350,6 +378,10 @@ export default function AdminProductManager() {
       delivery_time: product.delivery_time ?? "Manual review",
       is_active: product.is_active ?? true,
     });
+
+    const url = new URL(window.location.href);
+    url.searchParams.set("category", product.category);
+    window.history.replaceState({}, "", url.toString());
 
     document.getElementById("product-manager")?.scrollIntoView({
       behavior: "smooth",
@@ -434,19 +466,27 @@ export default function AdminProductManager() {
         </button>
       </div>
 
-      <div className="mt-5 flex flex-wrap gap-2">
+      <div className="mt-5 grid gap-4 md:grid-cols-4">
         {(["market", "accounts", "pins", "offers"] as ProductCategory[]).map(
           (category) => (
             <button
               key={category}
               onClick={() => changeActiveCategory(category)}
-              className={`rounded-xl px-4 py-2 text-sm font-semibold ${
+              className={`rounded-2xl border p-4 text-left ${
                 activeCategory === category
-                  ? "bg-yellow-400 text-black"
-                  : "bg-zinc-800 text-white hover:bg-zinc-700"
+                  ? "border-yellow-400 bg-yellow-400 text-black"
+                  : "border-zinc-800 bg-zinc-950 text-white hover:border-zinc-700"
               }`}
             >
-              {categoryLabels[category]}
+              <div className="text-2xl">{categoryIcons[category]}</div>
+              <p className="mt-2 font-bold">{categoryLabels[category]}</p>
+              <p
+                className={`mt-1 text-xs ${
+                  activeCategory === category ? "text-black/70" : "text-zinc-500"
+                }`}
+              >
+                {products.filter((product) => product.category === category).length} listing(s)
+              </p>
             </button>
           )
         )}
@@ -458,12 +498,13 @@ export default function AdminProductManager() {
       >
         <div className="flex flex-col justify-between gap-3 md:flex-row md:items-center">
           <div>
-            <h3 className="font-bold">
-              {editingId ? "Edit Listing" : "Add New Listing"}
+            <h3 className="text-xl font-bold">
+              {editingId
+                ? `Edit ${categoryLabels[form.category]} Listing`
+                : `Add ${categoryLabels[form.category]} Listing`}
             </h3>
             <p className="mt-1 text-sm text-zinc-500">
-              Upload product images from your computer or paste image/video
-              URLs.
+              {categoryDescriptions[form.category]}
             </p>
           </div>
 
@@ -521,7 +562,15 @@ export default function AdminProductManager() {
             <span className="text-sm font-semibold text-zinc-300">Title</span>
             <input
               className="rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
-              placeholder="e.g. Black Finger Sleeves"
+              placeholder={
+                form.category === "market"
+                  ? "e.g. Black Finger Sleeves"
+                  : form.category === "accounts"
+                  ? "e.g. 90K Trophy Account"
+                  : form.category === "pins"
+                  ? "e.g. Exclusive Pin Bundle"
+                  : "e.g. Weekend Bundle Offer"
+              }
               value={form.title}
               onChange={(e) => updateForm("title", e.target.value)}
             />
@@ -544,11 +593,11 @@ export default function AdminProductManager() {
 
           <label className="grid gap-2">
             <span className="text-sm font-semibold text-zinc-300">
-              Delivery Time
+              Delivery / Collection
             </span>
             <input
               className="rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
-              placeholder="Manual review / Ready stock / Preorder"
+              placeholder="Ready stock / Preorder / Manual review"
               value={form.delivery_time}
               onChange={(e) => updateForm("delivery_time", e.target.value)}
             />
@@ -559,8 +608,8 @@ export default function AdminProductManager() {
               Description
             </span>
             <textarea
-              className="min-h-24 rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
-              placeholder="Describe the product, stock, condition, delivery, or collection method."
+              className="min-h-28 rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
+              placeholder="Describe the listing clearly. Include condition, stock, delivery, collection method, or what the buyer receives."
               value={form.description}
               onChange={(e) => updateForm("description", e.target.value)}
             />
@@ -587,10 +636,10 @@ export default function AdminProductManager() {
               <img
                 src={form.image_url}
                 alt="Listing preview"
-                className="h-40 w-full rounded-xl object-cover"
+                className="h-48 w-full rounded-xl object-cover"
               />
             ) : (
-              <div className="flex h-40 w-full items-center justify-center rounded-xl bg-zinc-800 text-4xl">
+              <div className="flex h-48 w-full items-center justify-center rounded-xl bg-zinc-800 text-5xl">
                 {categoryIcons[form.category]}
               </div>
             )}
@@ -620,17 +669,17 @@ export default function AdminProductManager() {
           {form.category !== "accounts" && form.category !== "market" && (
             <div className="grid gap-3 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
               <span className="text-sm font-semibold text-zinc-300">
-                Rank/Icon Image
+                Optional Icon Image
               </span>
 
               {form.rank_icon_url ? (
                 <img
                   src={form.rank_icon_url}
                   alt="Icon preview"
-                  className="h-20 w-20 rounded-xl border border-zinc-700 bg-zinc-950 object-cover p-1"
+                  className="h-24 w-24 rounded-xl border border-zinc-700 bg-zinc-950 object-cover p-1"
                 />
               ) : (
-                <div className="flex h-20 w-20 items-center justify-center rounded-xl bg-zinc-800 text-3xl">
+                <div className="flex h-24 w-24 items-center justify-center rounded-xl bg-zinc-800 text-4xl">
                   🏆
                 </div>
               )}
@@ -727,7 +776,7 @@ export default function AdminProductManager() {
             >
               <div className="flex flex-col gap-5 md:flex-row md:items-start md:justify-between">
                 <div className="flex gap-4">
-                  <div className="relative h-24 w-32 shrink-0 overflow-hidden rounded-xl bg-zinc-800">
+                  <div className="relative h-28 w-36 shrink-0 overflow-hidden rounded-xl bg-zinc-800">
                     {product.video_url ? (
                       <video
                         src={product.video_url}
@@ -772,7 +821,7 @@ export default function AdminProductManager() {
                       </span>
                     </div>
 
-                    <p className="mt-2 text-sm text-zinc-400">
+                    <p className="mt-2 max-w-2xl text-sm text-zinc-400">
                       {product.description || "No description"}
                     </p>
 
