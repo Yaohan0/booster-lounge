@@ -281,6 +281,43 @@ export default function AdminPage() {
   }
 
   async function acceptRequest(request: OrderRequest) {
+    if (request.status !== "pending") {
+      alert("This request has already been processed.");
+      await refreshData();
+      return;
+    }
+
+    const { data: latestRequest, error: latestRequestError } = await supabase
+      .from("order_requests")
+      .select("status")
+      .eq("id", request.id)
+      .single();
+
+    if (latestRequestError) {
+      alert(latestRequestError.message);
+      return;
+    }
+
+    if (latestRequest?.status !== "pending") {
+      alert("This request was already accepted, rejected, or converted.");
+      await refreshData();
+      return;
+    }
+
+    const { error: lockError } = await supabase
+      .from("order_requests")
+      .update({
+        status: "converted_to_order",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", request.id)
+      .eq("status", "pending");
+
+    if (lockError) {
+      alert(lockError.message);
+      return;
+    }
+
     const { data: insertedOrder, error: orderError } = await supabase
       .from("orders")
       .insert({
@@ -316,19 +353,6 @@ export default function AdminPage() {
         alert(updateError.message);
         return;
       }
-    }
-
-    const { error: requestError } = await supabase
-      .from("order_requests")
-      .update({
-        status: "converted_to_order",
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", request.id);
-
-    if (requestError) {
-      alert(requestError.message);
-      return;
     }
 
     await refreshData();
@@ -615,6 +639,7 @@ export default function AdminPage() {
     (order) =>
       order.status !== "completed" &&
       order.status !== "cancelled" &&
+      order.status !== "rejected" &&
       !order.admin_archived
   );
 
@@ -640,7 +665,18 @@ export default function AdminPage() {
     const matchesStatus =
       statusFilter === "all" || order.status === statusFilter;
 
-    return matchesSearch && matchesStatus && !order.admin_archived;
+    const shouldShowInMainList =
+      statusFilter !== "all" ||
+      (order.status !== "completed" &&
+        order.status !== "cancelled" &&
+        order.status !== "rejected");
+
+    return (
+      matchesSearch &&
+      matchesStatus &&
+      shouldShowInMainList &&
+      !order.admin_archived
+    );
   });
 
   const normalUsers = profiles.filter((profile) => profile.role !== "admin");
@@ -688,7 +724,10 @@ export default function AdminPage() {
               Market
             </Link>
 
-            <Link href="/admin/products" className="text-zinc-300 hover:text-white">
+            <Link
+              href="/admin/products"
+              className="text-zinc-300 hover:text-white"
+            >
               Product Manager
             </Link>
 
@@ -731,7 +770,9 @@ export default function AdminPage() {
           <StatCard label="Completed" value={completedOrders.length} />
           <StatCard
             label="Processed Requests"
-            value={requests.filter((request) => request.status !== "pending").length}
+            value={
+              requests.filter((request) => request.status !== "pending").length
+            }
           />
         </div>
 
@@ -778,7 +819,7 @@ export default function AdminPage() {
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
           >
-            <option value="all">All order statuses</option>
+            <option value="all">Active orders only</option>
             {orderStatuses.map((status) => (
               <option key={status} value={status}>
                 {status.replaceAll("_", " ")}
@@ -790,7 +831,9 @@ export default function AdminPage() {
         {(activeTab === "overview" || activeTab === "requests") && (
           <div className="mt-8 grid gap-6 lg:grid-cols-2">
             <section className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-6">
-              <h2 className="text-xl font-bold">Create / Assign Manual Order</h2>
+              <h2 className="text-xl font-bold">
+                Create / Assign Manual Order
+              </h2>
 
               <form onSubmit={assignOrder} className="mt-5 grid gap-4">
                 <select
@@ -1056,15 +1099,12 @@ export default function AdminPage() {
                             </button>
                           )}
 
-                          {(order.status === "rejected" ||
-                            order.status === "cancelled") && (
-                            <button
-                              onClick={() => deleteOrder(order.id)}
-                              className="rounded-xl bg-red-600 px-4 py-2 text-sm font-bold text-white hover:bg-red-500"
-                            >
-                              Delete
-                            </button>
-                          )}
+                          <button
+                            onClick={() => deleteOrder(order.id)}
+                            className="rounded-xl bg-red-600 px-4 py-2 text-sm font-bold text-white hover:bg-red-500"
+                          >
+                            Delete
+                          </button>
                         </div>
                       </div>
 
