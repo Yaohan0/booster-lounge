@@ -19,6 +19,8 @@ type Order = {
   user_seen_update: boolean | null;
   admin_archived: boolean | null;
   notes?: string | null;
+  progress_percent: number | null;
+  started_at: string | null;
 };
 
 type OrderRequest = {
@@ -47,6 +49,15 @@ type Message = {
   created_at: string;
 };
 
+type OrderUpdate = {
+  id: string;
+  order_id: string;
+  created_by: string | null;
+  message: string;
+  progress_percent: number;
+  created_at: string;
+};
+
 type DashboardTab = "overview" | "orders" | "requests" | "history";
 
 export default function DashboardPage() {
@@ -56,6 +67,7 @@ export default function DashboardPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [requests, setRequests] = useState<OrderRequest[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [orderUpdates, setOrderUpdates] = useState<OrderUpdate[]>([]);
 
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
@@ -82,6 +94,51 @@ export default function DashboardPage() {
   useEffect(() => {
     loadData();
   }, []);
+
+  useEffect(() => {
+    if (!currentUserId) return;
+
+    const channel = supabase
+      .channel(`dashboard-updates-${currentUserId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "orders",
+        },
+        () => {
+          loadData();
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "order_updates",
+        },
+        () => {
+          loadData();
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "messages",
+        },
+        () => {
+          loadMessagesOnly();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [currentUserId, supabase]);
 
   async function loadData() {
     setLoading(true);
@@ -144,10 +201,36 @@ export default function DashboardPage() {
       return;
     }
 
+    const { data: updateData, error: updateError } = await supabase
+      .from("order_updates")
+      .select("*")
+      .order("created_at", { ascending: true });
+
+    if (updateError) {
+      console.error(updateError.message);
+      setLoading(false);
+      return;
+    }
+
     setRequests((requestData ?? []) as OrderRequest[]);
     setOrders((orderData ?? []) as Order[]);
     setMessages((messageData ?? []) as Message[]);
+    setOrderUpdates((updateData ?? []) as OrderUpdate[]);
     setLoading(false);
+  }
+
+  async function loadMessagesOnly() {
+    const { data: messageData, error: messageError } = await supabase
+      .from("messages")
+      .select("*")
+      .order("created_at", { ascending: true });
+
+    if (messageError) {
+      alert(messageError.message);
+      return;
+    }
+
+    setMessages((messageData ?? []) as Message[]);
   }
 
   function formatDate(date: string | null) {
@@ -157,6 +240,15 @@ export default function DashboardPage() {
       dateStyle: "medium",
       timeStyle: "short",
     }).format(new Date(date));
+  }
+
+  function getOrderLogs(orderId: string) {
+    return orderUpdates.filter((update) => update.order_id === orderId);
+  }
+
+  function getLatestOrderLog(orderId: string) {
+    const logs = getOrderLogs(orderId);
+    return logs[logs.length - 1] ?? null;
   }
 
   async function logout() {
@@ -272,25 +364,19 @@ export default function DashboardPage() {
     await loadMessagesOnly();
   }
 
-  async function loadMessagesOnly() {
-    const { data: messageData, error: messageError } = await supabase
-      .from("messages")
-      .select("*")
-      .order("created_at", { ascending: true });
+  const activeOrders = orders.filter(
+    (order) =>
+      order.status !== "completed" &&
+      order.status !== "cancelled" &&
+      order.status !== "rejected"
+  );
 
-    if (messageError) {
-      alert(messageError.message);
-      return;
-    }
-
-    setMessages((messageData ?? []) as Message[]);
-  }
-
-  const activeOrders = orders.filter((order) => order.status !== "completed");
   const completedOrders = orders.filter((order) => order.status === "completed");
+
   const unreadOrders = orders.filter(
     (order) => order.user_seen_update === false
   );
+
   const pendingRequests = requests.filter(
     (request) => request.status === "pending"
   );
@@ -330,6 +416,13 @@ export default function DashboardPage() {
       subtitle="Track requests, active orders, completed history, credits, and admin chat."
       rightAction={
         <div className="flex flex-wrap gap-3">
+          <button
+            onClick={loadData}
+            className="rounded-xl border border-zinc-700 px-4 py-2 text-sm font-bold text-zinc-200 hover:bg-zinc-900"
+          >
+            Refresh
+          </button>
+
           <Link
             href="/services"
             className="rounded-xl bg-yellow-400 px-4 py-2 text-sm font-bold text-black hover:bg-yellow-300"
@@ -458,9 +551,15 @@ export default function DashboardPage() {
                 <CompactOrderCard
                   key={order.id}
                   order={order}
+                  latestUpdate={getLatestOrderLog(order.id)}
                   formatDate={formatDate}
                   onOpen={() => {
-                    setActiveTab("orders");
+                    if (order.status === "completed") {
+                      setActiveTab("history");
+                    } else {
+                      setActiveTab("orders");
+                    }
+
                     setExpandedOrderId(order.id);
                   }}
                 />
@@ -575,7 +674,7 @@ export default function DashboardPage() {
         <section className="mt-8">
           <SectionHeader
             title="Active Orders"
-            subtitle="Orders currently pending, accepted, in progress, rejected, or cancelled."
+            subtitle="Orders currently accepted or in progress."
           />
 
           <div className="mt-6 grid gap-5">
@@ -587,6 +686,8 @@ export default function DashboardPage() {
               <OrderCard
                 key={order.id}
                 order={order}
+                logs={getOrderLogs(order.id)}
+                latestUpdate={getLatestOrderLog(order.id)}
                 messages={messages}
                 currentUserId={currentUserId}
                 chatInputs={chatInputs}
@@ -660,6 +761,8 @@ export default function DashboardPage() {
               <OrderCard
                 key={order.id}
                 order={order}
+                logs={getOrderLogs(order.id)}
+                latestUpdate={getLatestOrderLog(order.id)}
                 messages={messages}
                 currentUserId={currentUserId}
                 chatInputs={chatInputs}
@@ -886,15 +989,71 @@ function InfoBox({
   );
 }
 
+function ProgressBar({ value }: { value: number }) {
+  const safeValue = Math.max(0, Math.min(100, value));
+
+  return (
+    <div className="mt-3 h-4 overflow-hidden rounded-full bg-zinc-800">
+      <div
+        className="h-full rounded-full bg-yellow-400 transition-all"
+        style={{ width: `${safeValue}%` }}
+      />
+    </div>
+  );
+}
+
+function UpdateTimeline({
+  logs,
+  formatDate,
+}: {
+  logs: OrderUpdate[];
+  formatDate: (date: string | null) => string;
+}) {
+  return (
+    <div className="mt-5 rounded-2xl border border-zinc-800 bg-zinc-950/80 p-5">
+      <h4 className="font-semibold">Update Timeline</h4>
+
+      <div className="mt-4 space-y-3">
+        {logs.length === 0 && (
+          <p className="text-sm text-zinc-500">No update logs yet.</p>
+        )}
+
+        {logs.map((log) => (
+          <div
+            key={log.id}
+            className="rounded-xl border border-zinc-800 bg-zinc-900 p-3"
+          >
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-sm font-bold text-yellow-300">
+                {log.progress_percent}%
+              </p>
+
+              <p className="text-xs text-zinc-500">
+                {formatDate(log.created_at)}
+              </p>
+            </div>
+
+            <p className="mt-2 text-sm text-zinc-300">{log.message}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function CompactOrderCard({
   order,
+  latestUpdate,
   formatDate,
   onOpen,
 }: {
   order: Order;
+  latestUpdate: OrderUpdate | null;
   formatDate: (date: string | null) => string;
   onOpen: () => void;
 }) {
+  const progress = order.progress_percent ?? 0;
+
   return (
     <button
       onClick={onOpen}
@@ -913,6 +1072,19 @@ function CompactOrderCard({
 
       <p className="mt-2 text-sm text-zinc-400">
         {order.current_rank || "N/A"} → {order.target_rank || "N/A"}
+      </p>
+
+      <div className="mt-3">
+        <div className="flex items-center justify-between text-xs">
+          <span className="text-zinc-500">Progress</span>
+          <span className="font-bold text-yellow-300">{progress}%</span>
+        </div>
+
+        <ProgressBar value={progress} />
+      </div>
+
+      <p className="mt-3 text-xs text-zinc-500">
+        Latest: {latestUpdate?.message || "No updates yet."}
       </p>
 
       <p className="mt-2 text-xs text-zinc-500">
@@ -1021,6 +1193,8 @@ function RequestCard({
 
 function OrderCard({
   order,
+  logs,
+  latestUpdate,
   messages,
   currentUserId,
   chatInputs,
@@ -1033,6 +1207,8 @@ function OrderCard({
   onToggle,
 }: {
   order: Order;
+  logs: OrderUpdate[];
+  latestUpdate: OrderUpdate | null;
   messages: Message[];
   currentUserId: string;
   chatInputs: Record<string, string>;
@@ -1047,6 +1223,8 @@ function OrderCard({
   const orderMessages = messages.filter(
     (message) => message.order_id === order.id
   );
+
+  const progress = order.progress_percent ?? 0;
 
   return (
     <div className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-6">
@@ -1087,6 +1265,19 @@ function OrderCard({
         </div>
       </div>
 
+      <div className="mt-5 rounded-2xl border border-zinc-800 bg-zinc-950/80 p-5">
+        <div className="flex items-center justify-between">
+          <p className="text-sm text-zinc-400">Boost Progress</p>
+          <p className="text-2xl font-bold text-yellow-300">{progress}%</p>
+        </div>
+
+        <ProgressBar value={progress} />
+
+        <p className="mt-3 text-sm text-zinc-400">
+          Latest update: {latestUpdate?.message || "No admin updates yet."}
+        </p>
+      </div>
+
       <div className="mt-5 grid gap-3 text-sm text-zinc-400 md:grid-cols-3">
         <DateBox label="Created" value={formatDate(order.created_at)} />
         <DateBox label="Last Updated" value={formatDate(order.updated_at)} />
@@ -1099,8 +1290,10 @@ function OrderCard({
         </InfoBox>
       )}
 
-      {order.status === "rejected" && (
-        <InfoBox tone="red">Your order has been rejected.</InfoBox>
+      {order.status === "in_progress" && (
+        <InfoBox tone="yellow">
+          Your boost is currently in progress. Check the update timeline below.
+        </InfoBox>
       )}
 
       {order.status === "completed" && (
@@ -1110,12 +1303,16 @@ function OrderCard({
       )}
 
       {expanded && (
-        <div className="mt-5 rounded-2xl border border-zinc-800 bg-zinc-950/80 p-4">
-          <h4 className="font-semibold">Order Details</h4>
-          <p className="mt-3 whitespace-pre-wrap text-sm text-zinc-400">
-            {order.notes || "No additional notes."}
-          </p>
-        </div>
+        <>
+          <div className="mt-5 rounded-2xl border border-zinc-800 bg-zinc-950/80 p-4">
+            <h4 className="font-semibold">Order Details</h4>
+            <p className="mt-3 whitespace-pre-wrap text-sm text-zinc-400">
+              {order.notes || "No additional notes."}
+            </p>
+          </div>
+
+          <UpdateTimeline logs={logs} formatDate={formatDate} />
+        </>
       )}
 
       {showChat && expanded && (
@@ -1142,7 +1339,10 @@ function OrderCard({
                     : "mr-auto bg-zinc-800 text-white"
                 }`}
               >
-                {message.message}
+                <p>{message.message}</p>
+                <p className="mt-1 text-[11px] opacity-70">
+                  {formatDate(message.created_at)}
+                </p>
               </div>
             ))}
           </div>
@@ -1197,6 +1397,7 @@ function FloatingSupportChat({
   sendMessage: (orderId: string) => Promise<void>;
 }) {
   const chatOrders = activeOrders.filter((order) => order.status !== "rejected");
+
   const selectedOrder =
     chatOrders.find((order) => order.id === selectedOrderId) ||
     chatOrders[0] ||
