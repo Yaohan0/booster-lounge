@@ -1,7 +1,57 @@
+"use client";
+
 import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { createClient } from "@/lib/supabaseClient";
 import AdminProductManager from "@/components/AdminProductManager";
 
 export default function AdminProductsPage() {
+  const supabase = useMemo(() => createClient(), []);
+  const router = useRouter();
+
+  const [allowed, setAllowed] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function checkAdminAccess() {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        router.push("/login");
+        return;
+      }
+
+      const { data: profile, error } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", user.id)
+        .single();
+
+      if (error || profile?.role !== "admin") {
+        router.push("/dashboard");
+        return;
+      }
+
+      setAllowed(true);
+      setLoading(false);
+    }
+
+    checkAdminAccess();
+  }, [router, supabase]);
+
+  if (loading || !allowed) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-zinc-950 text-white">
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6 text-zinc-300">
+          Checking admin access...
+        </div>
+      </main>
+    );
+  }
+
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top,_#27272a,_#09090b_55%)] px-6 py-8 text-white">
       <section className="mx-auto max-w-6xl">
@@ -55,8 +105,8 @@ export default function AdminProductsPage() {
             </h1>
 
             <p className="mt-2 max-w-2xl text-zinc-400">
-              Create and manage marketplace listings for accounts, pins, offers,
-              finger sleeves, keychains, and other products.
+              Create and manage marketplace listings separately from boosting
+              orders.
             </p>
           </div>
 

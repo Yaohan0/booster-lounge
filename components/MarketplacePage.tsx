@@ -120,6 +120,7 @@ export default function MarketplacePage({
   const router = useRouter();
 
   const [products, setProducts] = useState<Product[]>([]);
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
 
   const [search, setSearch] = useState("");
@@ -552,6 +553,7 @@ export default function MarketplacePage({
                   product={product}
                   category={category}
                   isAdmin={isAdmin}
+                  onOpen={() => setSelectedProduct(product)}
                   onRequest={() => requestProduct(product)}
                 />
               ))}
@@ -574,6 +576,16 @@ export default function MarketplacePage({
           </section>
         </div>
       </section>
+
+      {selectedProduct && (
+        <ProductDetailsModal
+          product={selectedProduct}
+          category={category}
+          isAdmin={isAdmin}
+          onClose={() => setSelectedProduct(null)}
+          onRequest={() => requestProduct(selectedProduct)}
+        />
+      )}
     </main>
   );
 }
@@ -582,23 +594,28 @@ function ProductCard({
   product,
   category,
   isAdmin,
+  onOpen,
   onRequest,
 }: {
   product: Product;
   category: ProductCategory;
   isAdmin: boolean;
+  onOpen: () => void;
   onRequest: () => void;
 }) {
   const whatsappUrl = buildWhatsAppUrl(product);
 
   return (
     <div className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900/90">
-      <div className="relative h-44 bg-zinc-950">
+      <button
+        type="button"
+        onClick={onOpen}
+        className="relative block h-52 w-full bg-zinc-950 text-left"
+      >
         {product.video_url ? (
           <video
             src={product.video_url}
             className="h-full w-full object-cover"
-            controls
             muted
           />
         ) : product.image_url ? (
@@ -613,6 +630,10 @@ function ProductCard({
           </div>
         )}
 
+        <div className="absolute bottom-3 right-3 rounded-full bg-black/70 px-3 py-1 text-xs font-semibold text-white">
+          View details
+        </div>
+
         {category !== "accounts" &&
           category !== "market" &&
           product.rank_icon_url && (
@@ -622,14 +643,14 @@ function ProductCard({
               className="absolute bottom-3 left-3 h-12 w-12 rounded-xl border border-zinc-700 bg-zinc-950 object-cover p-1"
             />
           )}
-      </div>
+      </button>
 
       <div className="p-5">
         <div className="flex justify-between gap-4">
           <div>
             <h3 className="font-bold leading-6">{product.title}</h3>
 
-            <p className="mt-3 line-clamp-2 text-sm text-zinc-400">
+            <p className="mt-3 line-clamp-3 text-sm leading-6 text-zinc-400">
               {product.description || "No description provided."}
             </p>
           </div>
@@ -680,6 +701,13 @@ function ProductCard({
           ) : (
             <div className="flex flex-col gap-2">
               <button
+                onClick={onOpen}
+                className="rounded-xl bg-zinc-800 px-4 py-2 text-sm font-bold text-white hover:bg-zinc-700"
+              >
+                Details
+              </button>
+
+              <button
                 onClick={onRequest}
                 className="rounded-xl bg-yellow-400 px-4 py-2 text-sm font-bold text-black hover:bg-yellow-300"
               >
@@ -698,6 +726,172 @@ function ProductCard({
               )}
             </div>
           )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ProductDetailsModal({
+  product,
+  category,
+  isAdmin,
+  onClose,
+  onRequest,
+}: {
+  product: Product;
+  category: ProductCategory;
+  isAdmin: boolean;
+  onClose: () => void;
+  onRequest: () => void;
+}) {
+  const whatsappUrl = buildWhatsAppUrl(product);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 px-4 py-6">
+      <div className="max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-3xl border border-zinc-800 bg-zinc-950 text-white shadow-2xl">
+        <div className="flex items-center justify-between border-b border-zinc-800 p-5">
+          <div>
+            <p className="text-sm text-zinc-500">{categoryLabels[category]}</p>
+            <h2 className="text-2xl font-bold">{product.title}</h2>
+          </div>
+
+          <button
+            onClick={onClose}
+            className="rounded-xl bg-zinc-800 px-4 py-2 text-sm hover:bg-zinc-700"
+          >
+            Close
+          </button>
+        </div>
+
+        <div className="grid gap-6 p-6 lg:grid-cols-[1.2fr_0.8fr]">
+          <div>
+            <div className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900">
+              {product.video_url ? (
+                <video
+                  src={product.video_url}
+                  className="max-h-[520px] w-full object-contain"
+                  controls
+                />
+              ) : product.image_url ? (
+                <img
+                  src={product.image_url}
+                  alt={product.title}
+                  className="max-h-[520px] w-full object-contain"
+                />
+              ) : (
+                <div className="flex h-80 items-center justify-center text-7xl">
+                  {categoryIcons[category]}
+                </div>
+              )}
+            </div>
+
+            {product.rank_icon_url &&
+              category !== "accounts" &&
+              category !== "market" && (
+                <div className="mt-4 flex items-center gap-3 rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
+                  <img
+                    src={product.rank_icon_url}
+                    alt="Icon"
+                    className="h-16 w-16 rounded-xl object-cover"
+                  />
+                  <div>
+                    <p className="font-semibold">Listing Icon</p>
+                    <p className="text-sm text-zinc-500">
+                      Extra visual icon uploaded by admin.
+                    </p>
+                  </div>
+                </div>
+              )}
+          </div>
+
+          <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-5">
+            <div className="flex items-center justify-between gap-4">
+              <p className="text-sm text-zinc-400">Price</p>
+              <p className="text-3xl font-bold text-yellow-300">
+                SGD{Number(product.price ?? 0).toFixed(2)}
+              </p>
+            </div>
+
+            <div className="mt-5 rounded-xl bg-zinc-950 p-4">
+              <p className="text-sm text-zinc-500">Delivery / Collection</p>
+              <p className="mt-1 font-semibold">
+                {product.delivery_time || "Manual review"}
+              </p>
+            </div>
+
+            <div className="mt-5">
+              <p className="text-sm font-semibold text-zinc-300">
+                Full Description
+              </p>
+
+              <p className="mt-3 whitespace-pre-wrap rounded-xl bg-zinc-950 p-4 text-sm leading-6 text-zinc-300">
+                {product.description || "No description provided."}
+              </p>
+            </div>
+
+            <div className="mt-5">
+              <p className="text-sm font-semibold text-zinc-300">Tags</p>
+
+              <div className="mt-3 flex flex-wrap gap-2">
+                {(product.tags ?? []).length > 0 ? (
+                  product.tags?.map((tag) => (
+                    <span
+                      key={tag}
+                      className="rounded-lg bg-zinc-800 px-2 py-1 text-xs text-zinc-300"
+                    >
+                      {tag}
+                    </span>
+                  ))
+                ) : (
+                  <p className="text-sm text-zinc-500">No tags.</p>
+                )}
+              </div>
+            </div>
+
+            <div className="mt-6 grid gap-3">
+              {isAdmin ? (
+                <Link
+                  href={productManagerHref(category)}
+                  className="rounded-xl bg-yellow-400 px-4 py-3 text-center text-sm font-bold text-black hover:bg-yellow-300"
+                >
+                  Manage This Listing
+                </Link>
+              ) : (
+                <>
+                  <button
+                    onClick={onRequest}
+                    className="rounded-xl bg-yellow-400 px-4 py-3 text-sm font-bold text-black hover:bg-yellow-300"
+                  >
+                    Request Purchase
+                  </button>
+
+                  {category === "market" && (
+                    <a
+                      href={whatsappUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="rounded-xl bg-green-500 px-4 py-3 text-center text-sm font-bold text-black hover:bg-green-400"
+                    >
+                      Contact on WhatsApp
+                    </a>
+                  )}
+                </>
+              )}
+
+              <button
+                onClick={onClose}
+                className="rounded-xl border border-zinc-700 px-4 py-3 text-sm font-bold text-zinc-200 hover:bg-zinc-900"
+              >
+                Back to Listings
+              </button>
+            </div>
+
+            <p className="mt-5 text-xs leading-5 text-zinc-500">
+              Do not share account passwords, email passwords, 2FA codes, or
+              recovery details through the site.
+            </p>
+          </div>
         </div>
       </div>
     </div>
