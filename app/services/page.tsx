@@ -3,7 +3,14 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabaseClient";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+import GameSwitcher from "@/components/GameSwitcher";
+import {
+  GameKey,
+  gameHref,
+  getGameFromSearchParams,
+  games,
+} from "@/lib/games";
 
 type ServiceType =
   | "Rank Boost"
@@ -66,28 +73,6 @@ const serviceTabs: ServiceType[] = [
   "Custom Request",
 ];
 
-const allRanks = [
-  "Bronze I",
-  "Bronze II",
-  "Bronze III",
-  "Silver I",
-  "Silver II",
-  "Silver III",
-  "Gold I",
-  "Gold II",
-  "Gold III",
-  "Diamond",
-  "Mythic I",
-  "Mythic II",
-  "Mythic III",
-  "Legendary I",
-  "Legendary II",
-  "Legendary III",
-  "Masters I",
-  "Masters II",
-  "Masters III",
-];
-
 const prestigeOptions = ["Prestige 1", "Prestige 2", "Prestige 3"];
 const coachingDurations = ["15 mins", "30 mins", "1 hour"];
 
@@ -102,6 +87,9 @@ const rankIcons: Record<string, string> = {
   "Gold II": "🟡",
   "Gold III": "🟡",
   Diamond: "💎",
+  "Diamond I": "💎",
+  "Diamond II": "💎",
+  "Diamond III": "💎",
   "Mythic I": "🔮",
   "Mythic II": "🔮",
   "Mythic III": "🔮",
@@ -111,45 +99,65 @@ const rankIcons: Record<string, string> = {
   "Masters I": "🏆",
   "Masters II": "🏆",
   "Masters III": "🏆",
+  Pro: "🏆",
+  Radiant: "🌟",
+  "Ultimate Champion": "👑",
 };
 
 function formatNumber(value: number) {
   return new Intl.NumberFormat("en-SG").format(value);
 }
 
-function getHigherRanks(currentRank: string) {
-  const currentIndex = allRanks.indexOf(currentRank);
+function getHigherRanks(ranks: string[], currentRank: string) {
+  const currentIndex = ranks.indexOf(currentRank);
 
-  if (currentIndex === -1) return allRanks;
+  if (currentIndex === -1) return ranks;
 
-  const higherRanks = allRanks.slice(currentIndex + 1);
+  const higherRanks = ranks.slice(currentIndex + 1);
 
   if (higherRanks.length === 0) return [currentRank];
 
   return higherRanks;
 }
 
-function normalizeTag(tag: string) {
-  const clean = tag.trim().toUpperCase();
+function normalizeTag(tag: string, selectedGame: GameKey) {
+  const clean = tag.trim();
 
   if (!clean) return "";
 
-  return clean.startsWith("#") ? clean : `#${clean}`;
+  if (selectedGame === "valorant") {
+    return clean;
+  }
+
+  const upper = clean.toUpperCase();
+
+  return upper.startsWith("#") ? upper : `#${upper}`;
+}
+
+function supportsBrawlApi(selectedGame: GameKey) {
+  return selectedGame === "brawl_stars";
 }
 
 export default function ServicesPage() {
   const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
+  const searchParams = useSearchParams();
 
-  const requireVerifiedTag = process.env.NODE_ENV === "development";
+  const selectedGame = getGameFromSearchParams(searchParams);
+  const gameConfig = games[selectedGame];
+
+  const requireVerifiedTag =
+    process.env.NODE_ENV === "development" && selectedGame === "brawl_stars";
 
   const [isAdmin, setIsAdmin] = useState(false);
 
   const [serviceType, setServiceType] = useState<ServiceType>("Rank Boost");
   const [orderMode, setOrderMode] = useState<OrderMode>("Boost");
 
-  const [currentRank, setCurrentRank] = useState("Bronze I");
-  const [targetRank, setTargetRank] = useState("Bronze II");
+  const [currentRank, setCurrentRank] = useState(gameConfig.ranks[0]);
+  const [targetRank, setTargetRank] = useState(
+    gameConfig.ranks[1] ?? gameConfig.ranks[0]
+  );
 
   const [currentTrophies, setCurrentTrophies] = useState("");
   const [targetTrophies, setTargetTrophies] = useState("");
@@ -173,7 +181,18 @@ export default function ServicesPage() {
   const [express, setExpress] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  const availableTargetRanks = getHigherRanks(currentRank);
+  const availableTargetRanks = getHigherRanks(gameConfig.ranks, currentRank);
+
+  useEffect(() => {
+    const firstRank = gameConfig.ranks[0];
+    const secondRank = gameConfig.ranks[1] ?? firstRank;
+
+    setCurrentRank(firstRank);
+    setTargetRank(secondRank);
+    setTag("");
+    setVerifiedPlayer(null);
+    setVerificationWarning("");
+  }, [selectedGame, gameConfig.ranks]);
 
   useEffect(() => {
     async function checkAdmin() {
@@ -207,9 +226,9 @@ export default function ServicesPage() {
   function changeCurrentRank(nextRank: string) {
     setCurrentRank(nextRank);
 
-    const higherRanks = getHigherRanks(nextRank);
-    const currentTargetIndex = allRanks.indexOf(targetRank);
-    const nextRankIndex = allRanks.indexOf(nextRank);
+    const higherRanks = getHigherRanks(gameConfig.ranks, nextRank);
+    const currentTargetIndex = gameConfig.ranks.indexOf(targetRank);
+    const nextRankIndex = gameConfig.ranks.indexOf(nextRank);
 
     if (currentTargetIndex <= nextRankIndex) {
       setTargetRank(higherRanks[0] ?? nextRank);
@@ -226,8 +245,8 @@ export default function ServicesPage() {
     setVerificationWarning("");
 
     if (tab === "Rank Boost") {
-      setCurrentRank("Bronze I");
-      setTargetRank("Bronze II");
+      setCurrentRank(gameConfig.ranks[0]);
+      setTargetRank(gameConfig.ranks[1] ?? gameConfig.ranks[0]);
     }
 
     if (tab === "Trophy Boost") {
@@ -270,15 +289,24 @@ export default function ServicesPage() {
   }
 
   function buildRequestNotes() {
+    const normalizedTag = normalizeTag(tag, selectedGame);
+
     const lines = [
       notes,
       "",
       "Order Details:",
+      `Game: ${gameConfig.label}`,
       `Service: ${serviceType}`,
       `Type: ${orderMode}`,
       `Express: ${express ? "Yes" : "No"}`,
-      `Tag: ${normalizeTag(tag) || "Not provided"}`,
-      `Verification Status: ${verifiedPlayer ? "Verified" : "Unverified"}`,
+      `${gameConfig.tagLabel}: ${normalizedTag || "Not provided"}`,
+      `Verification Status: ${
+        verifiedPlayer
+          ? "Verified"
+          : supportsBrawlApi(selectedGame)
+          ? "Unverified"
+          : "Manual review"
+      }`,
     ];
 
     if (verificationWarning && !verifiedPlayer) {
@@ -309,14 +337,14 @@ export default function ServicesPage() {
       lines.push(`Current Trophies: ${currentTrophies}`);
       lines.push(`Target Trophies: ${targetTrophies}`);
       lines.push(`Total Trophies: ${totalTrophies}`);
-      lines.push(`Brawler: ${brawler}`);
+      lines.push(`Character / Brawler / Item: ${brawler}`);
     }
 
     if (serviceType === "Prestige Icon") {
       lines.push("");
       lines.push(`Prestige Target: ${prestigeTarget}`);
-      lines.push(`Brawler: ${brawler}`);
-      lines.push(`Brawler Trophies: ${brawlerTrophies}`);
+      lines.push(`Character / Brawler: ${brawler}`);
+      lines.push(`Character / Brawler Trophies: ${brawlerTrophies}`);
     }
 
     if (serviceType === "Coaching") {
@@ -336,15 +364,15 @@ export default function ServicesPage() {
       return false;
     }
 
-    const cleanTag = normalizeTag(tag);
+    const cleanTag = normalizeTag(tag, selectedGame);
 
     if (!cleanTag) {
-      alert("Player tag is required.");
+      alert(`${gameConfig.tagLabel} is required.`);
       return false;
     }
 
-    if (!cleanTag.startsWith("#")) {
-      alert("Player tag must start with #.");
+    if (selectedGame !== "valorant" && !cleanTag.startsWith("#")) {
+      alert(`${gameConfig.tagLabel} must start with #.`);
       return false;
     }
 
@@ -353,7 +381,10 @@ export default function ServicesPage() {
       return false;
     }
 
-    if (verifiedPlayer && normalizeTag(verifiedPlayer.tag) !== cleanTag) {
+    if (
+      verifiedPlayer &&
+      normalizeTag(verifiedPlayer.tag, selectedGame) !== cleanTag
+    ) {
       alert("Your tag changed after verification. Please verify it again.");
       return false;
     }
@@ -364,8 +395,8 @@ export default function ServicesPage() {
         return false;
       }
 
-      const currentIndex = allRanks.indexOf(currentRank);
-      const targetIndex = allRanks.indexOf(targetRank);
+      const currentIndex = gameConfig.ranks.indexOf(currentRank);
+      const targetIndex = gameConfig.ranks.indexOf(targetRank);
 
       if (targetIndex <= currentIndex) {
         alert("Target rank must be above your current rank.");
@@ -381,7 +412,7 @@ export default function ServicesPage() {
         !brawler.trim()
       ) {
         alert(
-          "Current trophies, target trophies, total trophies, and brawler are required."
+          "Current value, target value, total value, and character/item field are required."
         );
         return false;
       }
@@ -389,7 +420,7 @@ export default function ServicesPage() {
 
     if (serviceType === "Prestige Icon") {
       if (!prestigeTarget || !brawler.trim() || !brawlerTrophies.trim()) {
-        alert("Prestige, brawler, and brawler trophies are required.");
+        alert("Prestige, character/brawler, and trophy/value field are required.");
         return false;
       }
     }
@@ -412,10 +443,17 @@ export default function ServicesPage() {
   }
 
   async function verifyPlayerTag() {
-    const cleanTag = normalizeTag(tag);
+    const cleanTag = normalizeTag(tag, selectedGame);
 
     if (!cleanTag) {
-      alert("Enter your player tag first.");
+      alert(`Enter your ${gameConfig.tagLabel} first.`);
+      return;
+    }
+
+    if (!supportsBrawlApi(selectedGame)) {
+      setVerificationWarning(
+        `${gameConfig.label} does not have API verification connected yet. Admin will review this manually.`
+      );
       return;
     }
 
@@ -504,7 +542,8 @@ export default function ServicesPage() {
 
     const { error } = await supabase.from("order_requests").insert({
       user_id: user.id,
-      service_type: serviceType,
+      game: selectedGame,
+      service_type: `${gameConfig.label} ${serviceType}`,
       current_rank: getCurrentValue(),
       target_rank: getTargetValue(),
       notes: buildRequestNotes(),
@@ -526,26 +565,57 @@ export default function ServicesPage() {
     <main className="min-h-screen bg-[#08080b] text-white">
       <nav className="border-b border-zinc-900 bg-[#0b0b10]/90">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-5">
-          <Link href="/" className="text-2xl font-bold text-yellow-400">
+          <Link
+            href={gameHref("/", selectedGame)}
+            className="text-2xl font-bold text-yellow-400"
+          >
             Booster Lounge
           </Link>
 
           <div className="hidden items-center gap-6 text-sm text-zinc-300 md:flex">
-            <Link href="/services" className="text-yellow-300">
+            <GameSwitcher />
+
+            <Link
+              href={gameHref("/services", selectedGame)}
+              className="text-yellow-300"
+            >
               Services
             </Link>
-            <Link href="/accounts" className="hover:text-white">
+
+            <Link
+              href={gameHref("/accounts", selectedGame)}
+              className="hover:text-white"
+            >
               Accounts
             </Link>
-            <Link href="/pins" className="hover:text-white">
-              Pins
-            </Link>
-            <Link href="/offers" className="hover:text-white">
+
+            {gameConfig.categories.includes("pins") && (
+              <Link
+                href={gameHref("/pins", selectedGame)}
+                className="hover:text-white"
+              >
+                Pins
+              </Link>
+            )}
+
+            <Link
+              href={gameHref("/offers", selectedGame)}
+              className="hover:text-white"
+            >
               Offers
             </Link>
+
+            <Link
+              href={gameHref("/market", selectedGame)}
+              className="hover:text-white"
+            >
+              Market
+            </Link>
+
             <Link href="/dashboard" className="hover:text-white">
               Dashboard
             </Link>
+
             {isAdmin && (
               <Link href="/admin" className="text-yellow-300 hover:text-white">
                 Admin
@@ -569,40 +639,49 @@ export default function ServicesPage() {
           <div className="flex flex-col gap-8 lg:flex-row lg:items-end lg:justify-between">
             <div>
               <p className="text-sm font-semibold text-yellow-300">
-                Brawl Stars Services
+                {gameConfig.label} Services
               </p>
 
               <h1 className="mt-4 max-w-3xl text-4xl font-bold tracking-tight md:text-6xl">
-                Build your request and verify your account tag.
+                Build your request for {gameConfig.label}.
               </h1>
 
               <p className="mt-5 max-w-2xl text-zinc-400">
-                Choose your service, boost type, target details, and Brawl Stars
-                tag. Your request will be reviewed before becoming an active
-                order.
+                Choose your service, boost type, target details, and{" "}
+                {gameConfig.tagLabel.toLowerCase()}. Your request will be
+                reviewed before becoming an active order.
               </p>
 
-              {!requireVerifiedTag && (
+              {supportsBrawlApi(selectedGame) && !requireVerifiedTag && (
                 <div className="mt-5 rounded-2xl border border-blue-400/30 bg-blue-400/10 p-4 text-sm text-blue-200">
-                  Production mode: tag verification is optional. If verification
-                  fails because of API IP restrictions, your request can still be
-                  submitted for manual admin review.
+                  Production mode: Brawl Stars tag verification is optional. If
+                  verification fails because of API IP restrictions, your
+                  request can still be submitted for manual admin review.
+                </div>
+              )}
+
+              {!supportsBrawlApi(selectedGame) && (
+                <div className="mt-5 rounded-2xl border border-blue-400/30 bg-blue-400/10 p-4 text-sm text-blue-200">
+                  {gameConfig.label} API verification is not connected yet.
+                  Admin will review your account ID manually.
                 </div>
               )}
 
               {isAdmin && (
                 <div className="mt-5 rounded-2xl border border-yellow-400/40 bg-yellow-400/10 p-4 text-sm text-yellow-200">
-                  Admin mode: customer requests are disabled. Use the admin
-                  panel to assign, edit, or delete orders.
+                  Admin mode: customer requests are disabled. Use the admin panel
+                  to assign, edit, or delete orders.
                 </div>
               )}
             </div>
 
             <div className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-5">
-              <p className="text-sm text-zinc-400">Dashboard-managed</p>
-              <p className="mt-2 text-3xl font-bold text-yellow-400">Safe</p>
+              <p className="text-sm text-zinc-400">Selected Game</p>
+              <p className="mt-2 text-3xl font-bold text-yellow-400">
+                {gameConfig.label}
+              </p>
               <p className="mt-1 text-sm text-zinc-500">
-                No passwords or 2FA codes
+                Dashboard-managed orders
               </p>
             </div>
           </div>
@@ -630,6 +709,8 @@ export default function ServicesPage() {
           >
             <div className="grid gap-6">
               <ServiceForm
+                gameLabel={gameConfig.label}
+                ranks={gameConfig.ranks}
                 serviceType={serviceType}
                 currentRank={currentRank}
                 setCurrentRank={changeCurrentRank}
@@ -663,7 +744,7 @@ export default function ServicesPage() {
 
                 <textarea
                   className="mt-4 min-h-36 w-full rounded-xl bg-zinc-800 p-4 outline-none focus:ring-2 focus:ring-yellow-400"
-                  placeholder="Example: preferred timing, special instructions, brawler preference, or questions..."
+                  placeholder="Example: preferred timing, special instructions, account details, or questions..."
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
                 />
@@ -726,17 +807,17 @@ export default function ServicesPage() {
                   {serviceType === "Trophy Boost" && (
                     <>
                       <TextField
-                        label="Total Trophies"
+                        label="Total Value / Trophies"
                         value={totalTrophies}
                         onChange={setTotalTrophies}
                         placeholder="e.g. 45000"
                       />
 
                       <TextField
-                        label="Brawler"
+                        label="Character / Brawler / Item"
                         value={brawler}
                         onChange={setBrawler}
-                        placeholder="e.g. Shelly"
+                        placeholder="e.g. Shelly, Arena deck, agent"
                       />
                     </>
                   )}
@@ -751,14 +832,14 @@ export default function ServicesPage() {
                       />
 
                       <TextField
-                        label="Brawler"
+                        label="Character / Brawler"
                         value={brawler}
                         onChange={setBrawler}
                         placeholder="e.g. Edgar"
                       />
 
                       <TextField
-                        label="Brawler Trophies"
+                        label="Character / Brawler Trophies"
                         value={brawlerTrophies}
                         onChange={setBrawlerTrophies}
                         placeholder="e.g. 850"
@@ -786,14 +867,14 @@ export default function ServicesPage() {
 
                   <div className="grid gap-2">
                     <span className="text-sm font-semibold text-zinc-200">
-                      Player Tag
+                      {gameConfig.tagLabel}
                     </span>
 
                     <input
                       className="rounded-xl bg-zinc-800 p-3 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
                       value={tag}
                       onChange={(e) => updateTag(e.target.value)}
-                      placeholder="#PLAYER_TAG"
+                      placeholder={gameConfig.tagPlaceholder}
                     />
 
                     <button
@@ -802,7 +883,11 @@ export default function ServicesPage() {
                       disabled={verifyingTag}
                       className="rounded-xl border border-yellow-400/50 px-4 py-3 text-sm font-bold text-yellow-300 hover:bg-yellow-400/10 disabled:cursor-not-allowed disabled:opacity-60"
                     >
-                      {verifyingTag ? "Verifying..." : "Verify Player Tag"}
+                      {verifyingTag
+                        ? "Verifying..."
+                        : supportsBrawlApi(selectedGame)
+                        ? "Verify Player Tag"
+                        : "Manual Review Only"}
                     </button>
                   </div>
 
@@ -818,14 +903,8 @@ export default function ServicesPage() {
 
                   {verificationWarning && !verifiedPlayer && (
                     <div className="rounded-2xl border border-yellow-400/30 bg-yellow-400/10 p-4 text-sm text-yellow-200">
-                      <p className="font-bold">Verification unavailable</p>
+                      <p className="font-bold">Verification note</p>
                       <p className="mt-1">{verificationWarning}</p>
-                      {!requireVerifiedTag && (
-                        <p className="mt-2 text-xs text-yellow-100">
-                          You can still submit this request. Admin will verify
-                          the tag manually.
-                        </p>
-                      )}
                     </div>
                   )}
                 </div>
@@ -835,15 +914,25 @@ export default function ServicesPage() {
                 <p className="text-sm text-zinc-400">Request Summary</p>
 
                 <div className="mt-4 space-y-3 text-sm">
+                  <SummaryRow label="Game" value={gameConfig.label} />
                   <SummaryRow label="Service" value={serviceType} />
                   <SummaryRow label="Type" value={orderMode} />
                   <SummaryRow label="Current" value={getCurrentValue()} />
                   <SummaryRow label="Target" value={getTargetValue()} />
                   <SummaryRow label="Express" value={express ? "Yes" : "No"} />
-                  <SummaryRow label="Tag" value={normalizeTag(tag) || "#"} />
+                  <SummaryRow
+                    label={gameConfig.tagLabel}
+                    value={normalizeTag(tag, selectedGame) || "-"}
+                  />
                   <SummaryRow
                     label="Verified"
-                    value={verifiedPlayer ? "Yes" : "No"}
+                    value={
+                      verifiedPlayer
+                        ? "Yes"
+                        : supportsBrawlApi(selectedGame)
+                        ? "No"
+                        : "Manual"
+                    }
                   />
                 </div>
 
@@ -859,8 +948,8 @@ export default function ServicesPage() {
                 {isAdmin
                   ? "Admin Cannot Submit Requests"
                   : loading
-                    ? "Submitting..."
-                    : "Submit request"}
+                  ? "Submitting..."
+                  : "Submit request"}
               </button>
 
               <p className="mt-4 text-center text-xs text-zinc-500">
@@ -876,6 +965,8 @@ export default function ServicesPage() {
 }
 
 type ServiceFormProps = {
+  gameLabel: string;
+  ranks: string[];
   serviceType: ServiceType;
   currentRank: string;
   setCurrentRank: (value: string) => void;
@@ -907,7 +998,7 @@ function ServiceForm(props: ServiceFormProps) {
         <RankCard
           title="Current Rank"
           value={props.currentRank}
-          options={allRanks}
+          options={props.ranks}
           onChange={props.setCurrentRank}
         />
 
@@ -923,34 +1014,34 @@ function ServiceForm(props: ServiceFormProps) {
 
   if (props.serviceType === "Trophy Boost") {
     return (
-      <FormPanel title="Trophy Boost">
+      <FormPanel title="Trophy / Value Boost">
         <div className="grid gap-4 md:grid-cols-2">
           <TextInput
-            label="Current trophy count"
+            label="Current value"
             value={props.currentTrophies}
             onChange={props.setCurrentTrophies}
             placeholder="e.g. 0"
           />
 
           <TextInput
-            label="Desired trophy count"
+            label="Desired value"
             value={props.targetTrophies}
             onChange={props.setTargetTrophies}
             placeholder="e.g. 100"
           />
 
           <TextInput
-            label="Total trophies"
+            label="Total value"
             value={props.totalTrophies}
             onChange={props.setTotalTrophies}
             placeholder="e.g. 45000"
           />
 
           <TextInput
-            label="Brawler"
+            label="Character / Brawler / Item"
             value={props.brawler}
             onChange={props.setBrawler}
-            placeholder="e.g. Colt"
+            placeholder="e.g. Colt, deck, agent"
           />
         </div>
       </FormPanel>
@@ -969,14 +1060,14 @@ function ServiceForm(props: ServiceFormProps) {
           />
 
           <TextInput
-            label="Brawler"
+            label="Character / Brawler"
             value={props.brawler}
             onChange={props.setBrawler}
             placeholder="e.g. Edgar"
           />
 
           <TextInput
-            label="Brawler trophies"
+            label="Character / Brawler trophies"
             value={props.brawlerTrophies}
             onChange={props.setBrawlerTrophies}
             placeholder="e.g. 850"
@@ -988,7 +1079,7 @@ function ServiceForm(props: ServiceFormProps) {
 
   if (props.serviceType === "Coaching") {
     return (
-      <FormPanel title="Coaching">
+      <FormPanel title={`${props.gameLabel} Coaching`}>
         <p className="mb-5 max-w-3xl text-zinc-300">
           Request gameplay feedback, strategy review, drafting advice, or
           improvement planning.
@@ -1469,10 +1560,10 @@ function TrustPanel() {
         </div>
 
         <div className="rounded-2xl bg-zinc-900 p-4">
-          <p className="font-semibold">Verified when available</p>
+          <p className="font-semibold">Manual review fallback</p>
           <p className="mt-1 text-sm text-zinc-500">
-            Local testing requires API verification. Production allows manual
-            admin review if API verification is unavailable.
+            If API verification is unavailable, admin can still review your
+            request manually.
           </p>
         </div>
       </div>

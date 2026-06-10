@@ -2,13 +2,21 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabaseClient";
+import GameSwitcher from "@/components/GameSwitcher";
+import {
+  GameKey,
+  gameHref,
+  getGameFromSearchParams,
+  games,
+} from "@/lib/games";
 
 type ProductCategory = "accounts" | "pins" | "offers" | "market";
 
 type Product = {
   id: string;
+  game: GameKey | null;
   category: ProductCategory;
   title: string;
   description: string | null;
@@ -92,15 +100,15 @@ const addListingLabels: Record<ProductCategory, string> = {
 
 const marketTypes = ["All", "In-game Items", "Finger Sleeves", "Keychains"];
 
-function productManagerHref(category: ProductCategory) {
-  return `/admin/products?category=${category}`;
+function productManagerHref(category: ProductCategory, game: GameKey) {
+  return `/admin/products?category=${category}&game=${game}`;
 }
 
-function buildWhatsAppUrl(product: Product) {
+function buildWhatsAppUrl(product: Product, gameLabel: string) {
   const phone = process.env.NEXT_PUBLIC_WHATSAPP_NUMBER || "65YOURNUMBER";
 
   const message = encodeURIComponent(
-    `Hi, I want to buy this from Booster Lounge:\n\nProduct: ${
+    `Hi, I want to buy this from Booster Lounge:\n\nGame: ${gameLabel}\nProduct: ${
       product.title
     }\nPrice: SGD${Number(product.price ?? 0).toFixed(
       2
@@ -118,6 +126,10 @@ export default function MarketplacePage({
 }: MarketplacePageProps) {
   const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
+  const searchParams = useSearchParams();
+
+  const selectedGame = getGameFromSearchParams(searchParams);
+  const gameConfig = games[selectedGame];
 
   const [products, setProducts] = useState<Product[]>([]);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
@@ -131,6 +143,8 @@ export default function MarketplacePage({
   const [maxPrice, setMaxPrice] = useState("");
   const [quickPrice, setQuickPrice] = useState("");
   const [marketTypeFilter, setMarketTypeFilter] = useState("All");
+
+  const categoryAllowed = gameConfig.categories.includes(category);
 
   useEffect(() => {
     async function loadMarketplace() {
@@ -152,9 +166,16 @@ export default function MarketplacePage({
         setIsAdmin(false);
       }
 
+      if (!categoryAllowed) {
+        setProducts([]);
+        setLoading(false);
+        return;
+      }
+
       const { data, error } = await supabase
         .from("products")
         .select("*")
+        .eq("game", selectedGame)
         .eq("category", category)
         .eq("is_active", true)
         .order("created_at", { ascending: false });
@@ -170,7 +191,7 @@ export default function MarketplacePage({
     }
 
     loadMarketplace();
-  }, [category, supabase]);
+  }, [category, categoryAllowed, selectedGame, supabase]);
 
   function matchesPrice(product: Product) {
     const price = Number(product.price ?? 0);
@@ -220,12 +241,13 @@ export default function MarketplacePage({
       alert(
         "Admins manage listings from the Product Manager. Admins cannot submit purchase requests."
       );
-      router.push(productManagerHref(category));
+      router.push(productManagerHref(category, selectedGame));
       return;
     }
 
     const notes = [
       `Product Request: ${product.title}`,
+      `Game: ${gameConfig.label}`,
       `Category: ${category}`,
       `Price: SGD${Number(product.price ?? 0).toFixed(2)}`,
       `Delivery: ${product.delivery_time || "Manual review"}`,
@@ -241,7 +263,8 @@ export default function MarketplacePage({
 
     const { error } = await supabase.from("order_requests").insert({
       user_id: user.id,
-      service_type: categoryLabels[category],
+      game: selectedGame,
+      service_type: `${gameConfig.label} ${categoryLabels[category]}`,
       current_rank: product.title,
       target_rank: `SGD${Number(product.price ?? 0).toFixed(2)}`,
       notes,
@@ -265,6 +288,7 @@ export default function MarketplacePage({
         product.tags?.join(" "),
         product.price?.toString(),
         product.delivery_time,
+        product.game,
       ]
         .join(" ")
         .toLowerCase();
@@ -291,17 +315,25 @@ export default function MarketplacePage({
     <main className="min-h-screen bg-[#08080b] text-white">
       <nav className="border-b border-zinc-900 bg-[#0b0b10]/90">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-5">
-          <Link href="/" className="text-2xl font-bold text-yellow-400">
+          <Link
+            href={gameHref("/", selectedGame)}
+            className="text-2xl font-bold text-yellow-400"
+          >
             Booster Lounge
           </Link>
 
           <div className="hidden items-center gap-6 text-sm text-zinc-300 md:flex">
-            <Link href="/services" className="hover:text-white">
+            <GameSwitcher />
+
+            <Link
+              href={gameHref("/services", selectedGame)}
+              className="hover:text-white"
+            >
               Services
             </Link>
 
             <Link
-              href="/accounts"
+              href={gameHref("/accounts", selectedGame)}
               className={
                 category === "accounts" ? "text-yellow-300" : "hover:text-white"
               }
@@ -309,17 +341,19 @@ export default function MarketplacePage({
               Accounts
             </Link>
 
-            <Link
-              href="/pins"
-              className={
-                category === "pins" ? "text-yellow-300" : "hover:text-white"
-              }
-            >
-              Pins
-            </Link>
+            {gameConfig.categories.includes("pins") && (
+              <Link
+                href={gameHref("/pins", selectedGame)}
+                className={
+                  category === "pins" ? "text-yellow-300" : "hover:text-white"
+                }
+              >
+                Pins
+              </Link>
+            )}
 
             <Link
-              href="/offers"
+              href={gameHref("/offers", selectedGame)}
               className={
                 category === "offers" ? "text-yellow-300" : "hover:text-white"
               }
@@ -328,7 +362,7 @@ export default function MarketplacePage({
             </Link>
 
             <Link
-              href="/market"
+              href={gameHref("/market", selectedGame)}
               className={
                 category === "market" ? "text-yellow-300" : "hover:text-white"
               }
@@ -347,7 +381,7 @@ export default function MarketplacePage({
                 </Link>
 
                 <Link
-                  href="/admin/products"
+                  href={`/admin/products?category=${category}&game=${selectedGame}`}
                   className="text-yellow-300 hover:text-white"
                 >
                   Product Manager
@@ -357,7 +391,11 @@ export default function MarketplacePage({
           </div>
 
           <Link
-            href={isAdmin ? "/admin/products" : "/dashboard"}
+            href={
+              isAdmin
+                ? `/admin/products?category=${category}&game=${selectedGame}`
+                : "/dashboard"
+            }
             className="rounded-xl bg-yellow-400 px-4 py-2 text-sm font-bold text-black hover:bg-yellow-300"
           >
             {isAdmin ? "Product Manager" : "My Dashboard"}
@@ -371,6 +409,16 @@ export default function MarketplacePage({
         <div className="relative mx-auto grid max-w-7xl gap-8 px-6 py-12 lg:grid-cols-[280px_1fr]">
           <aside className="h-fit rounded-3xl border border-zinc-800 bg-zinc-950/80 p-6">
             <h2 className="text-2xl font-bold">Filters</h2>
+
+            <div className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900/80 p-4">
+              <p className="text-sm text-zinc-500">Selected Game</p>
+              <p className="mt-1 font-bold text-yellow-300">
+                {gameConfig.label}
+              </p>
+              <p className="mt-2 text-xs leading-5 text-zinc-500">
+                {gameConfig.description}
+              </p>
+            </div>
 
             {category === "market" && (
               <div className="mt-8 border-t border-zinc-800 pt-6">
@@ -475,28 +523,39 @@ export default function MarketplacePage({
           <section>
             <div className="flex flex-col justify-between gap-5 md:flex-row md:items-start">
               <div>
-                <h1 className="text-4xl font-bold">{title}</h1>
+                <p className="text-sm font-bold text-yellow-300">
+                  {gameConfig.label}
+                </p>
+
+                <h1 className="mt-2 text-4xl font-bold">{title}</h1>
                 <p className="mt-3 max-w-2xl text-zinc-400">{subtitle}</p>
 
-                {category === "market" && (
+                {!categoryAllowed && (
+                  <div className="mt-4 rounded-2xl border border-red-400/40 bg-red-400/10 p-4 text-sm text-red-200">
+                    This category is not enabled for {gameConfig.label}.
+                  </div>
+                )}
+
+                {category === "market" && categoryAllowed && (
                   <div className="mt-4 rounded-2xl border border-yellow-400/40 bg-yellow-400/10 p-4 text-sm text-yellow-200">
                     Market products can be requested through the dashboard or
                     contacted through WhatsApp.
                   </div>
                 )}
 
-                {isAdmin && (
+                {isAdmin && categoryAllowed && (
                   <div className="mt-4 rounded-2xl border border-yellow-400/40 bg-yellow-400/10 p-4 text-sm text-yellow-200">
                     Admin mode: requests are disabled here. Use Product Manager
-                    to add, edit, hide, or delete listings.
+                    to add, edit, hide, or delete listings for{" "}
+                    {gameConfig.label}.
                   </div>
                 )}
               </div>
 
               <div className="flex flex-col gap-3 sm:flex-row">
-                {isAdmin && (
+                {isAdmin && categoryAllowed && (
                   <Link
-                    href={productManagerHref(category)}
+                    href={productManagerHref(category, selectedGame)}
                     className="rounded-xl bg-yellow-400 px-5 py-3 text-center text-sm font-bold text-black hover:bg-yellow-300"
                   >
                     {addListingLabels[category]}
@@ -515,64 +574,70 @@ export default function MarketplacePage({
               </div>
             </div>
 
-            <div className="mt-8">
-              <input
-                className="w-full max-w-xl rounded-xl bg-zinc-800 p-4 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
-                placeholder={searchPlaceholder}
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-            </div>
+            {categoryAllowed && (
+              <>
+                <div className="mt-8">
+                  <input
+                    className="w-full max-w-xl rounded-xl bg-zinc-800 p-4 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
+                    placeholder={searchPlaceholder}
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                  />
+                </div>
 
-            <div className="mt-5 flex flex-wrap gap-2">
-              <span className="mr-1 text-sm font-semibold text-zinc-300">
-                Popular searches:
-              </span>
+                <div className="mt-5 flex flex-wrap gap-2">
+                  <span className="mr-1 text-sm font-semibold text-zinc-300">
+                    Popular searches:
+                  </span>
 
-              {popularSearches[category].map((item) => (
-                <button
-                  key={item}
-                  onClick={() => setSearch(item)}
-                  className="rounded-xl bg-zinc-800 px-4 py-2 text-sm hover:bg-zinc-700"
-                >
-                  {item}
-                </button>
-              ))}
-            </div>
-
-            <p className="mt-8 text-sm text-zinc-500">
-              {loading
-                ? "Loading listings..."
-                : `${filteredProducts.length} item(s) found`}
-            </p>
-
-            <div className="mt-6 grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-              {filteredProducts.map((product) => (
-                <ProductCard
-                  key={product.id}
-                  product={product}
-                  category={category}
-                  isAdmin={isAdmin}
-                  onOpen={() => setSelectedProduct(product)}
-                  onRequest={() => requestProduct(product)}
-                />
-              ))}
-
-              {!loading && filteredProducts.length === 0 && (
-                <div className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-6 text-zinc-400">
-                  <p>No listings found.</p>
-
-                  {isAdmin && (
-                    <Link
-                      href={productManagerHref(category)}
-                      className="mt-4 inline-flex rounded-xl bg-yellow-400 px-5 py-3 text-sm font-bold text-black hover:bg-yellow-300"
+                  {popularSearches[category].map((item) => (
+                    <button
+                      key={item}
+                      onClick={() => setSearch(item)}
+                      className="rounded-xl bg-zinc-800 px-4 py-2 text-sm hover:bg-zinc-700"
                     >
-                      {addListingLabels[category]}
-                    </Link>
+                      {item}
+                    </button>
+                  ))}
+                </div>
+
+                <p className="mt-8 text-sm text-zinc-500">
+                  {loading
+                    ? "Loading listings..."
+                    : `${filteredProducts.length} item(s) found`}
+                </p>
+
+                <div className="mt-6 grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+                  {filteredProducts.map((product) => (
+                    <ProductCard
+                      key={product.id}
+                      product={product}
+                      category={category}
+                      gameLabel={gameConfig.label}
+                      isAdmin={isAdmin}
+                      selectedGame={selectedGame}
+                      onOpen={() => setSelectedProduct(product)}
+                      onRequest={() => requestProduct(product)}
+                    />
+                  ))}
+
+                  {!loading && filteredProducts.length === 0 && (
+                    <div className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-6 text-zinc-400">
+                      <p>No listings found for {gameConfig.label}.</p>
+
+                      {isAdmin && (
+                        <Link
+                          href={productManagerHref(category, selectedGame)}
+                          className="mt-4 inline-flex rounded-xl bg-yellow-400 px-5 py-3 text-sm font-bold text-black hover:bg-yellow-300"
+                        >
+                          {addListingLabels[category]}
+                        </Link>
+                      )}
+                    </div>
                   )}
                 </div>
-              )}
-            </div>
+              </>
+            )}
           </section>
         </div>
       </section>
@@ -581,6 +646,8 @@ export default function MarketplacePage({
         <ProductDetailsModal
           product={selectedProduct}
           category={category}
+          gameLabel={gameConfig.label}
+          selectedGame={selectedGame}
           isAdmin={isAdmin}
           onClose={() => setSelectedProduct(null)}
           onRequest={() => requestProduct(selectedProduct)}
@@ -593,17 +660,21 @@ export default function MarketplacePage({
 function ProductCard({
   product,
   category,
+  gameLabel,
   isAdmin,
+  selectedGame,
   onOpen,
   onRequest,
 }: {
   product: Product;
   category: ProductCategory;
+  gameLabel: string;
   isAdmin: boolean;
+  selectedGame: GameKey;
   onOpen: () => void;
   onRequest: () => void;
 }) {
-  const whatsappUrl = buildWhatsAppUrl(product);
+  const whatsappUrl = buildWhatsAppUrl(product, gameLabel);
 
   return (
     <div className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900/90">
@@ -648,7 +719,8 @@ function ProductCard({
       <div className="p-5">
         <div className="flex justify-between gap-4">
           <div>
-            <h3 className="font-bold leading-6">{product.title}</h3>
+            <p className="text-xs font-semibold text-yellow-300">{gameLabel}</p>
+            <h3 className="mt-1 font-bold leading-6">{product.title}</h3>
 
             <p className="mt-3 line-clamp-3 text-sm leading-6 text-zinc-400">
               {product.description || "No description provided."}
@@ -685,14 +757,14 @@ function ProductCard({
           {isAdmin ? (
             <div className="flex flex-col gap-2">
               <Link
-                href={productManagerHref(category)}
+                href={productManagerHref(category, selectedGame)}
                 className="rounded-xl bg-zinc-800 px-4 py-2 text-center text-sm font-bold text-white hover:bg-zinc-700"
               >
                 Manage
               </Link>
 
               <Link
-                href={productManagerHref(category)}
+                href={productManagerHref(category, selectedGame)}
                 className="rounded-xl bg-yellow-400 px-4 py-2 text-center text-sm font-bold text-black hover:bg-yellow-300"
               >
                 Add
@@ -735,24 +807,30 @@ function ProductCard({
 function ProductDetailsModal({
   product,
   category,
+  gameLabel,
+  selectedGame,
   isAdmin,
   onClose,
   onRequest,
 }: {
   product: Product;
   category: ProductCategory;
+  gameLabel: string;
+  selectedGame: GameKey;
   isAdmin: boolean;
   onClose: () => void;
   onRequest: () => void;
 }) {
-  const whatsappUrl = buildWhatsAppUrl(product);
+  const whatsappUrl = buildWhatsAppUrl(product, gameLabel);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 px-4 py-6">
       <div className="max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-3xl border border-zinc-800 bg-zinc-950 text-white shadow-2xl">
         <div className="flex items-center justify-between border-b border-zinc-800 p-5">
           <div>
-            <p className="text-sm text-zinc-500">{categoryLabels[category]}</p>
+            <p className="text-sm text-zinc-500">
+              {gameLabel} • {categoryLabels[category]}
+            </p>
             <h2 className="text-2xl font-bold">{product.title}</h2>
           </div>
 
@@ -806,7 +884,12 @@ function ProductDetailsModal({
           </div>
 
           <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-5">
-            <div className="flex items-center justify-between gap-4">
+            <div className="rounded-xl bg-zinc-950 p-4">
+              <p className="text-sm text-zinc-500">Game</p>
+              <p className="mt-1 font-semibold text-yellow-300">{gameLabel}</p>
+            </div>
+
+            <div className="mt-5 flex items-center justify-between gap-4">
               <p className="text-sm text-zinc-400">Price</p>
               <p className="text-3xl font-bold text-yellow-300">
                 SGD{Number(product.price ?? 0).toFixed(2)}
@@ -852,7 +935,7 @@ function ProductDetailsModal({
             <div className="mt-6 grid gap-3">
               {isAdmin ? (
                 <Link
-                  href={productManagerHref(category)}
+                  href={productManagerHref(category, selectedGame)}
                   className="rounded-xl bg-yellow-400 px-4 py-3 text-center text-sm font-bold text-black hover:bg-yellow-300"
                 >
                   Manage This Listing

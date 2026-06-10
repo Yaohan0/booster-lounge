@@ -1,13 +1,21 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabaseClient";
+import {
+  GameKey,
+  gameList,
+  getGameFromSearchParams,
+  games,
+} from "@/lib/games";
 
 type ProductCategory = "accounts" | "pins" | "offers" | "market";
 type MarketType = "In-game Items" | "Finger Sleeves" | "Keychains";
 
 type Product = {
   id: string;
+  game: GameKey | null;
   category: ProductCategory;
   title: string;
   description: string | null;
@@ -22,6 +30,7 @@ type Product = {
 };
 
 type ProductForm = {
+  game: GameKey;
   category: ProductCategory;
   market_type: MarketType;
   title: string;
@@ -36,6 +45,7 @@ type ProductForm = {
 };
 
 const emptyForm: ProductForm = {
+  game: "brawl_stars",
   category: "market",
   market_type: "Finger Sleeves",
   title: "",
@@ -57,10 +67,12 @@ const categoryLabels: Record<ProductCategory, string> = {
 };
 
 const categoryDescriptions: Record<ProductCategory, string> = {
-  accounts: "Create account-style listing cards with images, title, description, price, and request button.",
+  accounts:
+    "Create account-style listing cards with images, title, description, price, and request button.",
   pins: "Create pin listings with image, optional icon, title, description, and price.",
   offers: "Create bundle or special offer listings.",
-  market: "Create physical or digital market listings such as in-game item requests, finger sleeves, and keychains.",
+  market:
+    "Create physical or digital market listings such as in-game item requests, finger sleeves, and keychains.",
 };
 
 const categoryIcons: Record<ProductCategory, string> = {
@@ -101,42 +113,42 @@ function isProductCategory(value: string | null): value is ProductCategory {
 
 export default function AdminProductManager() {
   const supabase = useMemo(() => createClient(), []);
+  const searchParams = useSearchParams();
+
+  const initialGame = getGameFromSearchParams(searchParams);
+  const initialCategory = isProductCategory(searchParams.get("category"))
+    ? searchParams.get("category")
+    : "market";
 
   const [products, setProducts] = useState<Product[]>([]);
-  const [form, setForm] = useState<ProductForm>(emptyForm);
+  const [form, setForm] = useState<ProductForm>({
+    ...emptyForm,
+    game: initialGame,
+    category: initialCategory as ProductCategory,
+  });
+
   const [editingId, setEditingId] = useState("");
-  const [activeCategory, setActiveCategory] =
-    useState<ProductCategory>("market");
+  const [activeGame, setActiveGame] = useState<GameKey>(initialGame);
+  const [activeCategory, setActiveCategory] = useState<ProductCategory>(
+    initialCategory as ProductCategory
+  );
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
 
   const [uploadingImage, setUploadingImage] = useState(false);
   const [uploadingRankIcon, setUploadingRankIcon] = useState(false);
 
+  const activeGameConfig = games[activeGame];
+
   useEffect(() => {
     loadProducts();
 
-    const params = new URLSearchParams(window.location.search);
-    const category = params.get("category");
-
-    if (isProductCategory(category)) {
-      setActiveCategory(category);
-      setForm((prev) => ({
-        ...prev,
-        category,
-        rank_icon_url:
-          category === "accounts" || category === "market"
-            ? ""
-            : prev.rank_icon_url,
-      }));
-
-      setTimeout(() => {
-        document.getElementById("product-manager")?.scrollIntoView({
-          behavior: "smooth",
-          block: "start",
-        });
-      }, 100);
-    }
+    setTimeout(() => {
+      document.getElementById("product-manager")?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    }, 100);
   }, []);
 
   async function loadProducts() {
@@ -155,6 +167,13 @@ export default function AdminProductManager() {
 
     setProducts((data ?? []) as Product[]);
     setLoading(false);
+  }
+
+  function updateUrl(nextGame: GameKey, nextCategory: ProductCategory) {
+    const url = new URL(window.location.href);
+    url.searchParams.set("game", nextGame);
+    url.searchParams.set("category", nextCategory);
+    window.history.replaceState({}, "", url.toString());
   }
 
   function updateForm<K extends keyof ProductForm>(
@@ -186,16 +205,53 @@ export default function AdminProductManager() {
     return baseTags;
   }
 
-  function resetForm(categoryOverride?: ProductCategory) {
+  function resetForm(categoryOverride?: ProductCategory, gameOverride?: GameKey) {
     const category = categoryOverride ?? activeCategory;
+    const game = gameOverride ?? activeGame;
 
     setForm({
       ...emptyForm,
+      game,
       category,
       rank_icon_url: "",
     });
 
     setEditingId("");
+  }
+
+  function changeActiveGame(game: GameKey) {
+    setActiveGame(game);
+    setSearch("");
+
+    const gameConfig = games[game];
+
+    let nextCategory = activeCategory;
+
+    if (!gameConfig.categories.includes(activeCategory)) {
+      nextCategory = "services" as ProductCategory;
+
+      if (!isProductCategory(nextCategory)) {
+        nextCategory = "market";
+      }
+
+      if (!gameConfig.categories.includes(nextCategory)) {
+        nextCategory = "accounts";
+      }
+    }
+
+    setActiveCategory(nextCategory);
+
+    setForm((prev) => ({
+      ...prev,
+      game,
+      category: nextCategory,
+      rank_icon_url:
+        nextCategory === "accounts" || nextCategory === "market"
+          ? ""
+          : prev.rank_icon_url,
+    }));
+
+    updateUrl(game, nextCategory);
   }
 
   function changeActiveCategory(category: ProductCategory) {
@@ -211,9 +267,7 @@ export default function AdminProductManager() {
           : prev.rank_icon_url,
     }));
 
-    const url = new URL(window.location.href);
-    url.searchParams.set("category", category);
-    window.history.replaceState({}, "", url.toString());
+    updateUrl(activeGame, category);
   }
 
   function cleanFileName(fileName: string) {
@@ -250,7 +304,7 @@ export default function AdminProductManager() {
 
     const safeName = cleanFileName(file.name);
     const folder = targetField === "image_url" ? "listing-images" : "rank-icons";
-    const filePath = `${folder}/${form.category}/${Date.now()}-${safeName}`;
+    const filePath = `${folder}/${form.game}/${form.category}/${Date.now()}-${safeName}`;
 
     const { error: uploadError } = await supabase.storage
       .from("product-images")
@@ -310,6 +364,7 @@ export default function AdminProductManager() {
     }
 
     const payload = {
+      game: form.game,
       category: form.category,
       title: form.title.trim(),
       description: form.description.trim(),
@@ -345,15 +400,19 @@ export default function AdminProductManager() {
       }
     }
 
-    resetForm(form.category);
+    resetForm(form.category, form.game);
     await loadProducts();
   }
 
   function startEdit(product: Product) {
+    const productGame = product.game ?? "brawl_stars";
+
     setEditingId(product.id);
+    setActiveGame(productGame);
     setActiveCategory(product.category);
 
     setForm({
+      game: productGame,
       category: product.category,
       market_type: inferMarketType(product.tags),
       title: product.title,
@@ -379,9 +438,7 @@ export default function AdminProductManager() {
       is_active: product.is_active ?? true,
     });
 
-    const url = new URL(window.location.href);
-    url.searchParams.set("category", product.category);
-    window.history.replaceState({}, "", url.toString());
+    updateUrl(productGame, product.category);
 
     document.getElementById("product-manager")?.scrollIntoView({
       behavior: "smooth",
@@ -426,12 +483,17 @@ export default function AdminProductManager() {
     await loadProducts();
   }
 
+  const availableCategories = (
+    ["market", "accounts", "pins", "offers"] as ProductCategory[]
+  ).filter((category) => activeGameConfig.categories.includes(category));
+
   const filteredProducts = products.filter((product) => {
     const text = [
       product.title,
       product.description,
       product.tags?.join(" "),
       product.category,
+      product.game,
       product.price?.toString(),
       product.delivery_time,
     ]
@@ -439,10 +501,19 @@ export default function AdminProductManager() {
       .toLowerCase();
 
     return (
+      (product.game ?? "brawl_stars") === activeGame &&
       product.category === activeCategory &&
       text.includes(search.toLowerCase())
     );
   });
+
+  function productCount(category: ProductCategory) {
+    return products.filter(
+      (product) =>
+        (product.game ?? "brawl_stars") === activeGame &&
+        product.category === category
+    ).length;
+  }
 
   return (
     <div
@@ -453,8 +524,8 @@ export default function AdminProductManager() {
         <div>
           <h2 className="text-xl font-bold">Product Manager</h2>
           <p className="mt-1 text-sm text-zinc-400">
-            Add, edit, delete, hide, and upload images for accounts, pins,
-            offers, and market items.
+            Add, edit, delete, hide, and upload images for each game's accounts,
+            pins, offers, and market items.
           </p>
         </div>
 
@@ -466,30 +537,52 @@ export default function AdminProductManager() {
         </button>
       </div>
 
+      <div className="mt-5 rounded-2xl border border-zinc-800 bg-zinc-950/80 p-5">
+        <label className="grid gap-2">
+          <span className="text-sm font-semibold text-zinc-300">
+            Manage Game
+          </span>
+
+          <select
+            className="rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
+            value={activeGame}
+            onChange={(e) => changeActiveGame(e.target.value as GameKey)}
+          >
+            {gameList.map((game) => (
+              <option key={game.key} value={game.key}>
+                {game.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <p className="mt-3 text-sm text-zinc-500">
+          {activeGameConfig.description}
+        </p>
+      </div>
+
       <div className="mt-5 grid gap-4 md:grid-cols-4">
-        {(["market", "accounts", "pins", "offers"] as ProductCategory[]).map(
-          (category) => (
-            <button
-              key={category}
-              onClick={() => changeActiveCategory(category)}
-              className={`rounded-2xl border p-4 text-left ${
-                activeCategory === category
-                  ? "border-yellow-400 bg-yellow-400 text-black"
-                  : "border-zinc-800 bg-zinc-950 text-white hover:border-zinc-700"
+        {availableCategories.map((category) => (
+          <button
+            key={category}
+            onClick={() => changeActiveCategory(category)}
+            className={`rounded-2xl border p-4 text-left ${
+              activeCategory === category
+                ? "border-yellow-400 bg-yellow-400 text-black"
+                : "border-zinc-800 bg-zinc-950 text-white hover:border-zinc-700"
+            }`}
+          >
+            <div className="text-2xl">{categoryIcons[category]}</div>
+            <p className="mt-2 font-bold">{categoryLabels[category]}</p>
+            <p
+              className={`mt-1 text-xs ${
+                activeCategory === category ? "text-black/70" : "text-zinc-500"
               }`}
             >
-              <div className="text-2xl">{categoryIcons[category]}</div>
-              <p className="mt-2 font-bold">{categoryLabels[category]}</p>
-              <p
-                className={`mt-1 text-xs ${
-                  activeCategory === category ? "text-black/70" : "text-zinc-500"
-                }`}
-              >
-                {products.filter((product) => product.category === category).length} listing(s)
-              </p>
-            </button>
-          )
-        )}
+              {productCount(category)} listing(s)
+            </p>
+          </button>
+        ))}
       </div>
 
       <form
@@ -503,8 +596,9 @@ export default function AdminProductManager() {
                 ? `Edit ${categoryLabels[form.category]} Listing`
                 : `Add ${categoryLabels[form.category]} Listing`}
             </h3>
+
             <p className="mt-1 text-sm text-zinc-500">
-              {categoryDescriptions[form.category]}
+              {games[form.game].label} • {categoryDescriptions[form.category]}
             </p>
           </div>
 
@@ -521,9 +615,31 @@ export default function AdminProductManager() {
 
         <div className="mt-5 grid gap-4 md:grid-cols-2">
           <label className="grid gap-2">
+            <span className="text-sm font-semibold text-zinc-300">Game</span>
+
+            <select
+              className="rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
+              value={form.game}
+              onChange={(e) => {
+                const nextGame = e.target.value as GameKey;
+                updateForm("game", nextGame);
+                setActiveGame(nextGame);
+                updateUrl(nextGame, form.category);
+              }}
+            >
+              {gameList.map((game) => (
+                <option key={game.key} value={game.key}>
+                  {game.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="grid gap-2">
             <span className="text-sm font-semibold text-zinc-300">
               Category
             </span>
+
             <select
               className="rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
               value={form.category}
@@ -532,10 +648,11 @@ export default function AdminProductManager() {
                 changeActiveCategory(nextCategory);
               }}
             >
-              <option value="market">Market</option>
-              <option value="accounts">Accounts</option>
-              <option value="pins">Pins</option>
-              <option value="offers">Offers</option>
+              {availableCategories.map((category) => (
+                <option key={category} value={category}>
+                  {categoryLabels[category]}
+                </option>
+              ))}
             </select>
           </label>
 
@@ -544,6 +661,7 @@ export default function AdminProductManager() {
               <span className="text-sm font-semibold text-zinc-300">
                 Market Type
               </span>
+
               <select
                 className="rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
                 value={form.market_type}
@@ -560,6 +678,7 @@ export default function AdminProductManager() {
 
           <label className="grid gap-2">
             <span className="text-sm font-semibold text-zinc-300">Title</span>
+
             <input
               className="rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
               placeholder={
@@ -580,6 +699,7 @@ export default function AdminProductManager() {
             <span className="text-sm font-semibold text-zinc-300">
               Price SGD
             </span>
+
             <input
               className="rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
               type="number"
@@ -595,6 +715,7 @@ export default function AdminProductManager() {
             <span className="text-sm font-semibold text-zinc-300">
               Delivery / Collection
             </span>
+
             <input
               className="rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
               placeholder="Ready stock / Preorder / Manual review"
@@ -607,6 +728,7 @@ export default function AdminProductManager() {
             <span className="text-sm font-semibold text-zinc-300">
               Description
             </span>
+
             <textarea
               className="min-h-28 rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
               placeholder="Describe the listing clearly. Include condition, stock, delivery, collection method, or what the buyer receives."
@@ -619,6 +741,7 @@ export default function AdminProductManager() {
             <span className="text-sm font-semibold text-zinc-300">
               Extra Tags, comma-separated
             </span>
+
             <input
               className="rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
               placeholder="Ready Stock, Black, Mobile Gaming"
@@ -711,6 +834,7 @@ export default function AdminProductManager() {
             <span className="text-sm font-semibold text-zinc-300">
               Video URL
             </span>
+
             <input
               className="rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
               placeholder="https://...mp4"
@@ -725,6 +849,7 @@ export default function AdminProductManager() {
               checked={form.is_active}
               onChange={(e) => updateForm("is_active", e.target.checked)}
             />
+
             <span className="text-sm font-semibold text-zinc-300">
               Active listing
             </span>
@@ -749,7 +874,9 @@ export default function AdminProductManager() {
       <div className="mt-6">
         <input
           className="w-full rounded-xl bg-zinc-800 p-3 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
-          placeholder={`Search ${categoryLabels[activeCategory].toLowerCase()}...`}
+          placeholder={`Search ${games[activeGame].label} ${categoryLabels[
+            activeCategory
+          ].toLowerCase()}...`}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
@@ -757,7 +884,7 @@ export default function AdminProductManager() {
         <p className="mt-4 text-sm text-zinc-500">
           {loading
             ? "Loading products..."
-            : `${filteredProducts.length} ${categoryLabels[
+            : `${filteredProducts.length} ${games[activeGame].label} ${categoryLabels[
                 activeCategory
               ].toLowerCase()} listing(s)`}
         </p>
@@ -765,7 +892,7 @@ export default function AdminProductManager() {
         <div className="mt-4 grid gap-4">
           {filteredProducts.length === 0 && !loading && (
             <div className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-6 text-zinc-400">
-              No listings found.
+              No listings found for {games[activeGame].label}.
             </div>
           )}
 
@@ -809,6 +936,10 @@ export default function AdminProductManager() {
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
                       <h4 className="font-bold">{product.title}</h4>
+
+                      <span className="rounded-full bg-yellow-400/10 px-2 py-1 text-xs font-semibold text-yellow-300">
+                        {games[product.game ?? "brawl_stars"].label}
+                      </span>
 
                       <span
                         className={`rounded-full px-2 py-1 text-xs font-semibold ${
