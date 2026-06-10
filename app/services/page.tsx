@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabaseClient";
 import { useRouter, useSearchParams } from "next/navigation";
 import GameSwitcher from "../../components/GameSwitcher";
@@ -138,7 +138,7 @@ function supportsBrawlApi(selectedGame: GameKey) {
   return selectedGame === "brawl_stars";
 }
 
-export default function ServicesPage() {
+function ServicesPageContent() {
   const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -420,7 +420,9 @@ export default function ServicesPage() {
 
     if (serviceType === "Prestige Icon") {
       if (!prestigeTarget || !brawler.trim() || !brawlerTrophies.trim()) {
-        alert("Prestige, character/brawler, and trophy/value field are required.");
+        alert(
+          "Prestige, character/brawler, and trophy/value field are required."
+        );
         return false;
       }
     }
@@ -655,8 +657,8 @@ export default function ServicesPage() {
               {supportsBrawlApi(selectedGame) && !requireVerifiedTag && (
                 <div className="mt-5 rounded-2xl border border-blue-400/30 bg-blue-400/10 p-4 text-sm text-blue-200">
                   Production mode: Brawl Stars tag verification is optional. If
-                  verification fails because of API IP restrictions, your
-                  request can still be submitted for manual admin review.
+                  verification fails because of API IP restrictions, your request
+                  can still be submitted for manual admin review.
                 </div>
               )}
 
@@ -669,8 +671,8 @@ export default function ServicesPage() {
 
               {isAdmin && (
                 <div className="mt-5 rounded-2xl border border-yellow-400/40 bg-yellow-400/10 p-4 text-sm text-yellow-200">
-                  Admin mode: customer requests are disabled. Use the admin panel
-                  to assign, edit, or delete orders.
+                  Admin mode: customer requests are disabled. Use the admin
+                  panel to assign, edit, or delete orders.
                 </div>
               )}
             </div>
@@ -1568,5 +1570,19 @@ function TrustPanel() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function ServicesPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="min-h-screen bg-[#08080b] p-8 text-white">
+          Loading services...
+        </main>
+      }
+    >
+      <ServicesPageContent />
+    </Suspense>
   );
 }

@@ -2,10 +2,9 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabaseClient";
-import GameSwitcher from "@/components/GameSwitcher";
-import { gameHref, getGameFromSearchParams } from "@/lib/games";
+import GameSwitcher from "./GameSwitcher";
+import { GameKey, gameHref, isGameKey } from "@/lib/games";
 
 type PageShellProps = {
   title: string;
@@ -21,10 +20,18 @@ export default function PageShell({
   rightAction,
 }: PageShellProps) {
   const supabase = useMemo(() => createClient(), []);
-  const searchParams = useSearchParams();
-  const selectedGame = getGameFromSearchParams(searchParams);
 
   const [isAdmin, setIsAdmin] = useState(false);
+  const [selectedGame, setSelectedGame] = useState<GameKey>("brawl_stars");
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const gameParam = params.get("game");
+
+    if (isGameKey(gameParam)) {
+      setSelectedGame(gameParam);
+    }
+  }, []);
 
   useEffect(() => {
     async function checkRole() {
