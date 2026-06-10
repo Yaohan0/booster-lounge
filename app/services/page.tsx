@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabaseClient";
 import { useRouter, useSearchParams } from "next/navigation";
-import GameSwitcher from "@/components/GameSwitcher";
+import GameSwitcher from "../../components/GameSwitcher";
 import {
   GameKey,
   gameHref,
