@@ -1,23 +1,25 @@
 "use client";
 
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { gameList, GameKey, isGameKey } from "@/lib/games";
+import { useEffect, useState } from "react";
+import { GameKey, gameList, isGameKey } from "@/lib/games";
 
 export default function GameSwitcher() {
-  const router = useRouter();
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
+  const [currentGame, setCurrentGame] = useState<GameKey>("brawl_stars");
 
-  const currentGameParam = searchParams.get("game");
-  const currentGame: GameKey = isGameKey(currentGameParam)
-    ? currentGameParam
-    : "brawl_stars";
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const gameParam = params.get("game");
+
+    if (isGameKey(gameParam)) {
+      setCurrentGame(gameParam);
+    }
+  }, []);
 
   function changeGame(nextGame: GameKey) {
-    const params = new URLSearchParams(searchParams.toString());
-    params.set("game", nextGame);
+    const url = new URL(window.location.href);
+    url.searchParams.set("game", nextGame);
 
-    router.push(`${pathname}?${params.toString()}`);
+    window.location.href = url.toString();
   }
 
   return (
