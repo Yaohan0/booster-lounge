@@ -88,7 +88,9 @@ export default function AdminProductsPage() {
             <Link href="/admin" className="text-zinc-300 hover:text-white">
               Orders Admin
             </Link>
-
+            <Link href="/admin/users" className="text-zinc-300 hover:text-white">
+              Users
+            </Link>
             <Link
               href="/admin/products"
               className="text-yellow-300 hover:text-white"

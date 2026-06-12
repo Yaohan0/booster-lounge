@@ -731,6 +731,15 @@ export default function AdminPage() {
               Product Manager
             </Link>
 
+            <Link 
+            href="/admin/catalog" className="text-zinc-300 hover:text-white">
+              Catalog
+            </Link>
+
+            <Link href="/admin/users" className="text-zinc-300 hover:text-white">
+              Users
+            </Link>
+            
             <Link href="/admin" className="text-yellow-300 hover:text-white">
               Orders Admin
             </Link>
