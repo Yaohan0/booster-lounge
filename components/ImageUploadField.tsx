@@ -9,14 +9,26 @@ type ImageUploadFieldProps = {
   onChange: (url: string) => void;
   bucket?: string;
   folder?: string;
+  placeholderIcon?: string;
+  previewClassName?: string;
 };
+
+function cleanFileName(fileName: string) {
+  return fileName
+    .toLowerCase()
+    .replace(/\.[^/.]+$/, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
 
 export default function ImageUploadField({
   label,
   value,
   onChange,
-  bucket = "listing-images",
+  bucket = "product-images",
   folder = "uploads",
+  placeholderIcon = "🛒",
+  previewClassName = "h-64",
 }: ImageUploadFieldProps) {
   const supabase = createClient();
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -32,21 +44,19 @@ export default function ImageUploadField({
       return;
     }
 
-    if (file.size > 5 * 1024 * 1024) {
-      setErrorMessage("Image must be below 5MB.");
+    const maxSizeMb = 5;
+    const maxSizeBytes = maxSizeMb * 1024 * 1024;
+
+    if (file.size > maxSizeBytes) {
+      setErrorMessage(`Image must be below ${maxSizeMb}MB.`);
       return;
     }
 
     setUploading(true);
 
-    const fileExt = file.name.split(".").pop();
-    const cleanName = file.name
-      .replace(/\.[^/.]+$/, "")
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "");
-
-    const filePath = `${folder}/${Date.now()}-${cleanName}.${fileExt}`;
+    const fileExt = file.name.split(".").pop() || "png";
+    const safeName = cleanFileName(file.name) || "image";
+    const filePath = `${folder}/${Date.now()}-${safeName}.${fileExt}`;
 
     const { error: uploadError } = await supabase.storage
       .from(bucket)
@@ -71,16 +81,14 @@ export default function ImageUploadField({
     <div className="rounded-3xl border border-zinc-800 bg-zinc-950 p-5">
       <h3 className="text-lg font-bold text-white">{label}</h3>
 
-      <div className="mt-4 flex h-64 items-center justify-center overflow-hidden rounded-2xl bg-zinc-800">
+      <div
+        className={`mt-4 flex items-center justify-center overflow-hidden rounded-2xl bg-zinc-800 ${previewClassName}`}
+      >
         {value ? (
-          <img
-            src={value}
-            alt={label}
-            className="h-full w-full object-cover"
-          />
+          <img src={value} alt={label} className="h-full w-full object-cover" />
         ) : (
           <div className="text-center">
-            <div className="text-5xl">🛒</div>
+            <div className="text-5xl">{placeholderIcon}</div>
             <p className="mt-3 text-sm text-zinc-400">No image selected</p>
           </div>
         )}
