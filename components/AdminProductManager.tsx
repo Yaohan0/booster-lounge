@@ -1,22 +1,37 @@
 "use client";
 
+import ImageUploadField from "@/components/ImageUploadField";
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabaseClient";
-import {
-  GameKey,
-  gameList,
-  getGameFromSearchParams,
-  games,
-} from "@/lib/games";
 
-type ProductCategory = "accounts" | "pins" | "offers" | "market";
-type MarketType = "In-game Items" | "Finger Sleeves" | "Keychains";
+type GameRow = {
+  id: string;
+  slug: string;
+  name: string;
+  short_name: string | null;
+  description: string | null;
+  image_url: string | null;
+  badge: string | null;
+  sort_order: number | null;
+  is_active: boolean;
+};
+
+type CategoryRow = {
+  id: string;
+  game_slug: string;
+  slug: string;
+  name: string;
+  description: string | null;
+  is_active: boolean;
+  sort_order: number | null;
+};
 
 type Product = {
   id: string;
-  game: GameKey | null;
-  category: ProductCategory;
+  game: string | null;
+  category: string;
   title: string;
   description: string | null;
   price: number | null;
@@ -30,9 +45,9 @@ type Product = {
 };
 
 type ProductForm = {
-  game: GameKey;
-  category: ProductCategory;
-  market_type: MarketType;
+  game: string;
+  category: string;
+  market_type: string;
   title: string;
   description: string;
   price: string;
@@ -45,8 +60,8 @@ type ProductForm = {
 };
 
 const emptyForm: ProductForm = {
-  game: "brawl_stars",
-  category: "market",
+  game: "",
+  category: "",
   market_type: "Finger Sleeves",
   title: "",
   description: "",
@@ -59,36 +74,21 @@ const emptyForm: ProductForm = {
   is_active: true,
 };
 
-const categoryLabels: Record<ProductCategory, string> = {
-  accounts: "Accounts",
-  pins: "Pins",
-  offers: "Offers",
-  market: "Market",
-};
+const marketTypes = ["In-game Items", "Finger Sleeves", "Keychains"];
 
-const categoryDescriptions: Record<ProductCategory, string> = {
-  accounts:
-    "Create account-style listing cards with images, title, description, price, and request button.",
-  pins: "Create pin listings with image, optional icon, title, description, and price.",
-  offers: "Create bundle or special offer listings.",
-  market:
-    "Create physical or digital market listings such as in-game item requests, finger sleeves, and keychains.",
-};
-
-const categoryIcons: Record<ProductCategory, string> = {
+const categoryIcons: Record<string, string> = {
   accounts: "🎮",
   pins: "📌",
   offers: "🔥",
   market: "🛒",
+  services: "⚡",
 };
 
-const marketTypes: MarketType[] = [
-  "In-game Items",
-  "Finger Sleeves",
-  "Keychains",
-];
+function getCategoryIcon(category: string) {
+  return categoryIcons[category] ?? "📦";
+}
 
-function inferMarketType(tags: string[] | null): MarketType {
+function inferMarketType(tags: string[] | null) {
   const values = tags ?? [];
 
   if (values.some((tag) => tag.toLowerCase() === "in-game items")) {
@@ -102,54 +102,120 @@ function inferMarketType(tags: string[] | null): MarketType {
   return "Finger Sleeves";
 }
 
-function isProductCategory(value: string | null): value is ProductCategory {
-  return (
-    value === "accounts" ||
-    value === "pins" ||
-    value === "offers" ||
-    value === "market"
-  );
+function shouldUseRankIcon(category: string) {
+  return category !== "accounts" && category !== "market";
 }
 
 export default function AdminProductManager() {
   const supabase = useMemo(() => createClient(), []);
   const searchParams = useSearchParams();
 
-  const initialGame = getGameFromSearchParams(searchParams);
-  const initialCategory = isProductCategory(searchParams.get("category"))
-    ? searchParams.get("category")
-    : "market";
-
+  const [games, setGames] = useState<GameRow[]>([]);
+  const [categories, setCategories] = useState<CategoryRow[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
-  const [form, setForm] = useState<ProductForm>({
-    ...emptyForm,
-    game: initialGame,
-    category: initialCategory as ProductCategory,
-  });
 
+  const [form, setForm] = useState<ProductForm>(emptyForm);
   const [editingId, setEditingId] = useState("");
-  const [activeGame, setActiveGame] = useState<GameKey>(initialGame);
-  const [activeCategory, setActiveCategory] = useState<ProductCategory>(
-    initialCategory as ProductCategory
+
+  const [activeGameSlug, setActiveGameSlug] = useState(
+    searchParams.get("game") ?? ""
   );
+  const [activeCategorySlug, setActiveCategorySlug] = useState(
+    searchParams.get("category") ?? ""
+  );
+
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
 
-  const [uploadingImage, setUploadingImage] = useState(false);
-  const [uploadingRankIcon, setUploadingRankIcon] = useState(false);
+  const currentGame = games.find((game) => game.slug === activeGameSlug);
 
-  const activeGameConfig = games[activeGame];
+  const availableCategories = categories
+    .filter((category) => category.game_slug === activeGameSlug)
+    .sort((a, b) => (a.sort_order ?? 10) - (b.sort_order ?? 10));
+
+  const currentCategory = categories.find(
+    (category) =>
+      category.game_slug === activeGameSlug &&
+      category.slug === activeCategorySlug
+  );
 
   useEffect(() => {
-    loadProducts();
-
-    setTimeout(() => {
-      document.getElementById("product-manager")?.scrollIntoView({
-        behavior: "smooth",
-        block: "start",
-      });
-    }, 100);
+    loadInitialData();
   }, []);
+
+  async function loadInitialData() {
+    setLoading(true);
+
+    const { data: gameData, error: gameError } = await supabase
+      .from("games")
+      .select("*")
+      .order("sort_order", { ascending: true })
+      .order("name", { ascending: true });
+
+    if (gameError) {
+      alert(gameError.message);
+      setLoading(false);
+      return;
+    }
+
+    const { data: categoryData, error: categoryError } = await supabase
+      .from("game_categories")
+      .select("*")
+      .order("game_slug", { ascending: true })
+      .order("sort_order", { ascending: true });
+
+    if (categoryError) {
+      alert(categoryError.message);
+      setLoading(false);
+      return;
+    }
+
+    const { data: productData, error: productError } = await supabase
+      .from("products")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (productError) {
+      alert(productError.message);
+      setLoading(false);
+      return;
+    }
+
+    const loadedGames = (gameData ?? []) as GameRow[];
+    const loadedCategories = (categoryData ?? []) as CategoryRow[];
+
+    const urlGame = searchParams.get("game");
+    const urlCategory = searchParams.get("category");
+
+    const firstGame = loadedGames[0]?.slug ?? "";
+    const nextGameSlug =
+      loadedGames.find((game) => game.slug === urlGame)?.slug ?? firstGame;
+
+    const categoriesForGame = loadedCategories.filter(
+      (category) => category.game_slug === nextGameSlug
+    );
+
+    const firstCategory = categoriesForGame[0]?.slug ?? "";
+    const nextCategorySlug =
+      categoriesForGame.find((category) => category.slug === urlCategory)
+        ?.slug ?? firstCategory;
+
+    setGames(loadedGames);
+    setCategories(loadedCategories);
+    setProducts((productData ?? []) as Product[]);
+
+    setActiveGameSlug(nextGameSlug);
+    setActiveCategorySlug(nextCategorySlug);
+
+    setForm({
+      ...emptyForm,
+      game: nextGameSlug,
+      category: nextCategorySlug,
+    });
+
+    updateUrl(nextGameSlug, nextCategorySlug);
+    setLoading(false);
+  }
 
   async function loadProducts() {
     setLoading(true);
@@ -169,10 +235,19 @@ export default function AdminProductManager() {
     setLoading(false);
   }
 
-  function updateUrl(nextGame: GameKey, nextCategory: ProductCategory) {
+  function updateUrl(nextGame: string, nextCategory: string) {
+    if (typeof window === "undefined") return;
+
     const url = new URL(window.location.href);
-    url.searchParams.set("game", nextGame);
-    url.searchParams.set("category", nextCategory);
+
+    if (nextGame) {
+      url.searchParams.set("game", nextGame);
+    }
+
+    if (nextCategory) {
+      url.searchParams.set("category", nextCategory);
+    }
+
     window.history.replaceState({}, "", url.toString());
   }
 
@@ -186,7 +261,25 @@ export default function AdminProductManager() {
     }));
   }
 
-  function parseTags(tags: string, category: ProductCategory) {
+  function getCategoryName(categorySlug: string) {
+    return (
+      categories.find(
+        (category) =>
+          category.game_slug === activeGameSlug && category.slug === categorySlug
+      )?.name ?? categorySlug
+    );
+  }
+
+  function getCategoryDescription(categorySlug: string) {
+    return (
+      categories.find(
+        (category) =>
+          category.game_slug === activeGameSlug && category.slug === categorySlug
+      )?.description ?? "Create and manage listings for this category."
+    );
+  }
+
+  function parseTags(tags: string, category: string) {
     const baseTags = tags
       .split(",")
       .map((tag) => tag.trim())
@@ -205,141 +298,69 @@ export default function AdminProductManager() {
     return baseTags;
   }
 
-  function resetForm(categoryOverride?: ProductCategory, gameOverride?: GameKey) {
-    const category = categoryOverride ?? activeCategory;
-    const game = gameOverride ?? activeGame;
+  function resetForm(categoryOverride?: string, gameOverride?: string) {
+    const nextGame = gameOverride ?? activeGameSlug;
+    const nextCategory = categoryOverride ?? activeCategorySlug;
 
     setForm({
       ...emptyForm,
-      game,
-      category,
-      rank_icon_url: "",
+      game: nextGame,
+      category: nextCategory,
     });
 
     setEditingId("");
   }
 
-  function changeActiveGame(game: GameKey) {
-    setActiveGame(game);
+  function changeActiveGame(gameSlug: string) {
+    const categoriesForGame = categories.filter(
+      (category) => category.game_slug === gameSlug
+    );
+
+    const nextCategory =
+      categoriesForGame.find((category) => category.slug === activeCategorySlug)
+        ?.slug ??
+      categoriesForGame[0]?.slug ??
+      "";
+
+    setActiveGameSlug(gameSlug);
+    setActiveCategorySlug(nextCategory);
     setSearch("");
-
-    const gameConfig = games[game];
-
-    let nextCategory = activeCategory;
-
-    if (!gameConfig.categories.includes(activeCategory)) {
-      nextCategory = "services" as ProductCategory;
-
-      if (!isProductCategory(nextCategory)) {
-        nextCategory = "market";
-      }
-
-      if (!gameConfig.categories.includes(nextCategory)) {
-        nextCategory = "accounts";
-      }
-    }
-
-    setActiveCategory(nextCategory);
 
     setForm((prev) => ({
       ...prev,
-      game,
+      game: gameSlug,
       category: nextCategory,
-      rank_icon_url:
-        nextCategory === "accounts" || nextCategory === "market"
-          ? ""
-          : prev.rank_icon_url,
+      rank_icon_url: shouldUseRankIcon(nextCategory) ? prev.rank_icon_url : "",
     }));
 
-    updateUrl(game, nextCategory);
+    updateUrl(gameSlug, nextCategory);
   }
 
-  function changeActiveCategory(category: ProductCategory) {
-    setActiveCategory(category);
+  function changeActiveCategory(categorySlug: string) {
+    setActiveCategorySlug(categorySlug);
     setSearch("");
 
     setForm((prev) => ({
       ...prev,
-      category,
-      rank_icon_url:
-        category === "accounts" || category === "market"
-          ? ""
-          : prev.rank_icon_url,
+      category: categorySlug,
+      rank_icon_url: shouldUseRankIcon(categorySlug) ? prev.rank_icon_url : "",
     }));
 
-    updateUrl(activeGame, category);
-  }
-
-  function cleanFileName(fileName: string) {
-    return fileName
-      .toLowerCase()
-      .replace(/[^a-z0-9.]+/g, "-")
-      .replace(/-+/g, "-");
-  }
-
-  async function uploadProductFile(
-    file: File,
-    targetField: "image_url" | "rank_icon_url"
-  ) {
-    if (!file) return;
-
-    if (!file.type.startsWith("image/")) {
-      alert("Please upload an image file.");
-      return;
-    }
-
-    const maxSizeMb = 5;
-    const maxSizeBytes = maxSizeMb * 1024 * 1024;
-
-    if (file.size > maxSizeBytes) {
-      alert(`Image is too large. Keep it under ${maxSizeMb}MB.`);
-      return;
-    }
-
-    if (targetField === "image_url") {
-      setUploadingImage(true);
-    } else {
-      setUploadingRankIcon(true);
-    }
-
-    const safeName = cleanFileName(file.name);
-    const folder = targetField === "image_url" ? "listing-images" : "rank-icons";
-    const filePath = `${folder}/${form.game}/${form.category}/${Date.now()}-${safeName}`;
-
-    const { error: uploadError } = await supabase.storage
-      .from("product-images")
-      .upload(filePath, file, {
-        cacheControl: "3600",
-        upsert: false,
-      });
-
-    if (uploadError) {
-      alert(uploadError.message);
-
-      if (targetField === "image_url") {
-        setUploadingImage(false);
-      } else {
-        setUploadingRankIcon(false);
-      }
-
-      return;
-    }
-
-    const { data } = supabase.storage
-      .from("product-images")
-      .getPublicUrl(filePath);
-
-    updateForm(targetField, data.publicUrl);
-
-    if (targetField === "image_url") {
-      setUploadingImage(false);
-    } else {
-      setUploadingRankIcon(false);
-    }
+    updateUrl(activeGameSlug, categorySlug);
   }
 
   async function saveProduct(e: React.FormEvent) {
     e.preventDefault();
+
+    if (!form.game) {
+      alert("Select a game first.");
+      return;
+    }
+
+    if (!form.category) {
+      alert("Select a category first.");
+      return;
+    }
 
     if (!form.title.trim()) {
       alert("Product title is required.");
@@ -372,10 +393,9 @@ export default function AdminProductManager() {
       tags: parseTags(form.tags, form.category),
       image_url: form.image_url.trim() || null,
       video_url: form.video_url.trim() || null,
-      rank_icon_url:
-        form.category === "accounts" || form.category === "market"
-          ? null
-          : form.rank_icon_url.trim() || null,
+      rank_icon_url: shouldUseRankIcon(form.category)
+        ? form.rank_icon_url.trim() || null
+        : null,
       delivery_time: form.delivery_time.trim() || "Manual review",
       is_active: form.is_active,
       updated_at: new Date().toISOString(),
@@ -405,15 +425,16 @@ export default function AdminProductManager() {
   }
 
   function startEdit(product: Product) {
-    const productGame = product.game ?? "brawl_stars";
+    const productGame = product.game ?? activeGameSlug;
+    const productCategory = product.category;
 
     setEditingId(product.id);
-    setActiveGame(productGame);
-    setActiveCategory(product.category);
+    setActiveGameSlug(productGame);
+    setActiveCategorySlug(productCategory);
 
     setForm({
       game: productGame,
-      category: product.category,
+      category: productCategory,
       market_type: inferMarketType(product.tags),
       title: product.title,
       description: product.description ?? "",
@@ -430,15 +451,14 @@ export default function AdminProductManager() {
           .join(", ") ?? "",
       image_url: product.image_url ?? "",
       video_url: product.video_url ?? "",
-      rank_icon_url:
-        product.category === "accounts" || product.category === "market"
-          ? ""
-          : product.rank_icon_url ?? "",
+      rank_icon_url: shouldUseRankIcon(productCategory)
+        ? product.rank_icon_url ?? ""
+        : "",
       delivery_time: product.delivery_time ?? "Manual review",
       is_active: product.is_active ?? true,
     });
 
-    updateUrl(productGame, product.category);
+    updateUrl(productGame, productCategory);
 
     document.getElementById("product-manager")?.scrollIntoView({
       behavior: "smooth",
@@ -483,10 +503,6 @@ export default function AdminProductManager() {
     await loadProducts();
   }
 
-  const availableCategories = (
-    ["market", "accounts", "pins", "offers"] as ProductCategory[]
-  ).filter((category) => activeGameConfig.categories.includes(category));
-
   const filteredProducts = products.filter((product) => {
     const text = [
       product.title,
@@ -501,17 +517,17 @@ export default function AdminProductManager() {
       .toLowerCase();
 
     return (
-      (product.game ?? "brawl_stars") === activeGame &&
-      product.category === activeCategory &&
+      (product.game ?? "") === activeGameSlug &&
+      product.category === activeCategorySlug &&
       text.includes(search.toLowerCase())
     );
   });
 
-  function productCount(category: ProductCategory) {
+  function productCount(categorySlug: string) {
     return products.filter(
       (product) =>
-        (product.game ?? "brawl_stars") === activeGame &&
-        product.category === category
+        (product.game ?? "") === activeGameSlug &&
+        product.category === categorySlug
     ).length;
   }
 
@@ -520,17 +536,18 @@ export default function AdminProductManager() {
       id="product-manager"
       className="mt-8 scroll-mt-8 rounded-2xl border border-zinc-800 bg-zinc-900/80 p-6"
     >
+      <AdminNav />
+
       <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
         <div>
           <h2 className="text-xl font-bold">Product Manager</h2>
           <p className="mt-1 text-sm text-zinc-400">
-            Add, edit, delete, hide, and upload images for each game's accounts,
-            pins, offers, and market items.
+            Add, edit, delete, hide, and upload images for each game's listings.
           </p>
         </div>
 
         <button
-          onClick={loadProducts}
+          onClick={loadInitialData}
           className="rounded-xl bg-zinc-800 px-4 py-2 text-sm hover:bg-zinc-700"
         >
           Refresh
@@ -545,44 +562,52 @@ export default function AdminProductManager() {
 
           <select
             className="rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
-            value={activeGame}
-            onChange={(e) => changeActiveGame(e.target.value as GameKey)}
+            value={activeGameSlug}
+            onChange={(e) => changeActiveGame(e.target.value)}
           >
-            {gameList.map((game) => (
-              <option key={game.key} value={game.key}>
-                {game.label}
+            {games.map((game) => (
+              <option key={game.id} value={game.slug}>
+                {game.name}
               </option>
             ))}
           </select>
         </label>
 
         <p className="mt-3 text-sm text-zinc-500">
-          {activeGameConfig.description}
+          {currentGame?.description || "Select a game to manage its listings."}
         </p>
       </div>
 
       <div className="mt-5 grid gap-4 md:grid-cols-4">
         {availableCategories.map((category) => (
           <button
-            key={category}
-            onClick={() => changeActiveCategory(category)}
+            key={category.id}
+            onClick={() => changeActiveCategory(category.slug)}
             className={`rounded-2xl border p-4 text-left ${
-              activeCategory === category
+              activeCategorySlug === category.slug
                 ? "border-yellow-400 bg-yellow-400 text-black"
                 : "border-zinc-800 bg-zinc-950 text-white hover:border-zinc-700"
             }`}
           >
-            <div className="text-2xl">{categoryIcons[category]}</div>
-            <p className="mt-2 font-bold">{categoryLabels[category]}</p>
+            <div className="text-2xl">{getCategoryIcon(category.slug)}</div>
+            <p className="mt-2 font-bold">{category.name}</p>
             <p
               className={`mt-1 text-xs ${
-                activeCategory === category ? "text-black/70" : "text-zinc-500"
+                activeCategorySlug === category.slug
+                  ? "text-black/70"
+                  : "text-zinc-500"
               }`}
             >
-              {productCount(category)} listing(s)
+              {productCount(category.slug)} listing(s)
             </p>
           </button>
         ))}
+
+        {availableCategories.length === 0 && (
+          <div className="rounded-2xl border border-zinc-800 bg-zinc-950 p-4 text-sm text-zinc-400 md:col-span-4">
+            No categories found for this game. Add categories in Admin Catalog.
+          </div>
+        )}
       </div>
 
       <form
@@ -593,12 +618,14 @@ export default function AdminProductManager() {
           <div>
             <h3 className="text-xl font-bold">
               {editingId
-                ? `Edit ${categoryLabels[form.category]} Listing`
-                : `Add ${categoryLabels[form.category]} Listing`}
+                ? `Edit ${getCategoryName(form.category)} Listing`
+                : `Add ${getCategoryName(form.category)} Listing`}
             </h3>
 
             <p className="mt-1 text-sm text-zinc-500">
-              {games[form.game].label} • {categoryDescriptions[form.category]}
+              {currentGame?.name || form.game} •{" "}
+              {currentCategory?.description ||
+                getCategoryDescription(form.category)}
             </p>
           </div>
 
@@ -621,15 +648,13 @@ export default function AdminProductManager() {
               className="rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
               value={form.game}
               onChange={(e) => {
-                const nextGame = e.target.value as GameKey;
-                updateForm("game", nextGame);
-                setActiveGame(nextGame);
-                updateUrl(nextGame, form.category);
+                const nextGame = e.target.value;
+                changeActiveGame(nextGame);
               }}
             >
-              {gameList.map((game) => (
-                <option key={game.key} value={game.key}>
-                  {game.label}
+              {games.map((game) => (
+                <option key={game.id} value={game.slug}>
+                  {game.name}
                 </option>
               ))}
             </select>
@@ -643,14 +668,11 @@ export default function AdminProductManager() {
             <select
               className="rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
               value={form.category}
-              onChange={(e) => {
-                const nextCategory = e.target.value as ProductCategory;
-                changeActiveCategory(nextCategory);
-              }}
+              onChange={(e) => changeActiveCategory(e.target.value)}
             >
               {availableCategories.map((category) => (
-                <option key={category} value={category}>
-                  {categoryLabels[category]}
+                <option key={category.id} value={category.slug}>
+                  {category.name}
                 </option>
               ))}
             </select>
@@ -665,9 +687,7 @@ export default function AdminProductManager() {
               <select
                 className="rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
                 value={form.market_type}
-                onChange={(e) =>
-                  updateForm("market_type", e.target.value as MarketType)
-                }
+                onChange={(e) => updateForm("market_type", e.target.value)}
               >
                 {marketTypes.map((type) => (
                   <option key={type}>{type}</option>
@@ -681,15 +701,7 @@ export default function AdminProductManager() {
 
             <input
               className="rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
-              placeholder={
-                form.category === "market"
-                  ? "e.g. Black Finger Sleeves"
-                  : form.category === "accounts"
-                  ? "e.g. 90K Trophy Account"
-                  : form.category === "pins"
-                  ? "e.g. Exclusive Pin Bundle"
-                  : "e.g. Weekend Bundle Offer"
-              }
+              placeholder="e.g. 90K Trophy Account"
               value={form.title}
               onChange={(e) => updateForm("title", e.target.value)}
             />
@@ -731,7 +743,7 @@ export default function AdminProductManager() {
 
             <textarea
               className="min-h-28 rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
-              placeholder="Describe the listing clearly. Include condition, stock, delivery, collection method, or what the buyer receives."
+              placeholder="Describe the listing clearly."
               value={form.description}
               onChange={(e) => updateForm("description", e.target.value)}
             />
@@ -744,89 +756,36 @@ export default function AdminProductManager() {
 
             <input
               className="rounded-xl bg-zinc-800 p-3 outline-none focus:ring-2 focus:ring-yellow-400"
-              placeholder="Ready Stock, Black, Mobile Gaming"
+              placeholder="Ready Stock, Max Rank, Limited"
               value={form.tags}
               onChange={(e) => updateForm("tags", e.target.value)}
             />
           </label>
 
-          <div className="grid gap-3 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
-            <span className="text-sm font-semibold text-zinc-300">
-              Listing Image
-            </span>
-
-            {form.image_url ? (
-              <img
-                src={form.image_url}
-                alt="Listing preview"
-                className="h-48 w-full rounded-xl object-cover"
-              />
-            ) : (
-              <div className="flex h-48 w-full items-center justify-center rounded-xl bg-zinc-800 text-5xl">
-                {categoryIcons[form.category]}
-              </div>
-            )}
-
-            <input
-              type="file"
-              accept="image/*"
-              className="rounded-xl bg-zinc-800 p-3 text-sm"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) uploadProductFile(file, "image_url");
-              }}
-            />
-
-            <input
-              className="rounded-xl bg-zinc-800 p-3 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
-              placeholder="Or paste image URL"
+          <div className="md:col-span-2">
+            <ImageUploadField
+              label="Listing Image"
               value={form.image_url}
-              onChange={(e) => updateForm("image_url", e.target.value)}
+              onChange={(url) => updateForm("image_url", url)}
+              folder={`listings/${form.game || "unknown"}/${
+                form.category || "uncategorized"
+              }`}
+              placeholderIcon={getCategoryIcon(form.category)}
             />
-
-            {uploadingImage && (
-              <p className="text-sm text-yellow-300">Uploading image...</p>
-            )}
           </div>
 
-          {form.category !== "accounts" && form.category !== "market" && (
-            <div className="grid gap-3 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4">
-              <span className="text-sm font-semibold text-zinc-300">
-                Optional Icon Image
-              </span>
-
-              {form.rank_icon_url ? (
-                <img
-                  src={form.rank_icon_url}
-                  alt="Icon preview"
-                  className="h-24 w-24 rounded-xl border border-zinc-700 bg-zinc-950 object-cover p-1"
-                />
-              ) : (
-                <div className="flex h-24 w-24 items-center justify-center rounded-xl bg-zinc-800 text-4xl">
-                  🏆
-                </div>
-              )}
-
-              <input
-                type="file"
-                accept="image/*"
-                className="rounded-xl bg-zinc-800 p-3 text-sm"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) uploadProductFile(file, "rank_icon_url");
-                }}
-              />
-
-              <input
-                className="rounded-xl bg-zinc-800 p-3 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
-                placeholder="Or paste icon URL"
+          {shouldUseRankIcon(form.category) && (
+            <div className="md:col-span-2">
+              <ImageUploadField
+                label="Optional Icon Image"
                 value={form.rank_icon_url}
-                onChange={(e) => updateForm("rank_icon_url", e.target.value)}
+                onChange={(url) => updateForm("rank_icon_url", url)}
+                folder={`rank-icons/${form.game || "unknown"}/${
+                  form.category || "uncategorized"
+                }`}
+                placeholderIcon="🏆"
+                previewClassName="h-32"
               />
-
-              {uploadingRankIcon && (
-                <p className="text-sm text-yellow-300">Uploading icon...</p>
-              )}
             </div>
           )}
 
@@ -874,9 +833,9 @@ export default function AdminProductManager() {
       <div className="mt-6">
         <input
           className="w-full rounded-xl bg-zinc-800 p-3 text-sm outline-none focus:ring-2 focus:ring-yellow-400"
-          placeholder={`Search ${games[activeGame].label} ${categoryLabels[
-            activeCategory
-          ].toLowerCase()}...`}
+          placeholder={`Search ${
+            currentGame?.name || "selected game"
+          } ${getCategoryName(activeCategorySlug).toLowerCase()}...`}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
@@ -884,15 +843,15 @@ export default function AdminProductManager() {
         <p className="mt-4 text-sm text-zinc-500">
           {loading
             ? "Loading products..."
-            : `${filteredProducts.length} ${games[activeGame].label} ${categoryLabels[
-                activeCategory
-              ].toLowerCase()} listing(s)`}
+            : `${filteredProducts.length} ${
+                currentGame?.name || "game"
+              } ${getCategoryName(activeCategorySlug).toLowerCase()} listing(s)`}
         </p>
 
         <div className="mt-4 grid gap-4">
           {filteredProducts.length === 0 && !loading && (
             <div className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-6 text-zinc-400">
-              No listings found for {games[activeGame].label}.
+              No listings found.
             </div>
           )}
 
@@ -918,12 +877,11 @@ export default function AdminProductManager() {
                       />
                     ) : (
                       <div className="flex h-full w-full items-center justify-center text-3xl">
-                        {categoryIcons[product.category]}
+                        {getCategoryIcon(product.category)}
                       </div>
                     )}
 
-                    {product.category !== "accounts" &&
-                      product.category !== "market" &&
+                    {shouldUseRankIcon(product.category) &&
                       product.rank_icon_url && (
                         <img
                           src={product.rank_icon_url}
@@ -938,7 +896,8 @@ export default function AdminProductManager() {
                       <h4 className="font-bold">{product.title}</h4>
 
                       <span className="rounded-full bg-yellow-400/10 px-2 py-1 text-xs font-semibold text-yellow-300">
-                        {games[product.game ?? "brawl_stars"].label}
+                        {games.find((game) => game.slug === product.game)
+                          ?.name ?? product.game}
                       </span>
 
                       <span
@@ -1005,5 +964,37 @@ export default function AdminProductManager() {
         </div>
       </div>
     </div>
+  );
+}
+
+function AdminNav() {
+  return (
+    <nav className="mb-6 flex flex-col gap-4 rounded-2xl border border-zinc-800 bg-zinc-950 px-5 py-4 md:flex-row md:items-center md:justify-between">
+      <Link href="/" className="text-xl font-bold text-yellow-400">
+        Booster Lounge
+      </Link>
+
+      <div className="flex flex-wrap gap-4 text-sm">
+        <Link href="/admin" className="text-zinc-300 hover:text-white">
+          Admin Orders
+        </Link>
+
+        <Link href="/admin/products" className="text-yellow-300">
+          Products
+        </Link>
+
+        <Link href="/admin/catalog" className="text-zinc-300 hover:text-white">
+          Catalog
+        </Link>
+
+        <Link href="/admin/users" className="text-zinc-300 hover:text-white">
+          Users
+        </Link>
+
+        <Link href="/dashboard" className="text-zinc-300 hover:text-white">
+          Dashboard
+        </Link>
+      </div>
+    </nav>
   );
 }

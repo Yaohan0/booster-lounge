@@ -1,5 +1,6 @@
 "use client";
 
+import ImageUploadField from "@/components/ImageUploadField";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -13,6 +14,9 @@ type GameRow = {
   description: string | null;
   tag_label: string | null;
   tag_placeholder: string | null;
+  image_url: string | null;
+  badge: string | null;
+  sort_order: number | null;
   is_active: boolean;
   created_at: string;
   updated_at?: string | null;
@@ -37,16 +41,22 @@ const requiredCategories = [
     sort_order: 1,
   },
   {
+    slug: "pins",
+    name: "Pins",
+    description: "Pins and small collectible listings.",
+    sort_order: 2,
+  },
+  {
     slug: "offers",
     name: "Offers",
     description: "Bundles, promotions, and special offers.",
-    sort_order: 2,
+    sort_order: 3,
   },
   {
     slug: "market",
     name: "Market",
     description: "Market products and game items.",
-    sort_order: 3,
+    sort_order: 4,
   },
 ];
 
@@ -56,6 +66,15 @@ function makeSlug(value: string) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "");
+}
+
+function getInitials(value: string) {
+  return value
+    .split(" ")
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
 }
 
 export default function AdminCatalogPage() {
@@ -76,6 +95,9 @@ export default function AdminCatalogPage() {
   const [description, setDescription] = useState("");
   const [tagLabel, setTagLabel] = useState("Player ID");
   const [tagPlaceholder, setTagPlaceholder] = useState("Enter player ID");
+  const [imageUrl, setImageUrl] = useState("");
+  const [badge, setBadge] = useState("");
+  const [sortOrder, setSortOrder] = useState("10");
 
   const [editingGameId, setEditingGameId] = useState<string | null>(null);
   const [editGameName, setEditGameName] = useState("");
@@ -84,6 +106,9 @@ export default function AdminCatalogPage() {
   const [editDescription, setEditDescription] = useState("");
   const [editTagLabel, setEditTagLabel] = useState("");
   const [editTagPlaceholder, setEditTagPlaceholder] = useState("");
+  const [editImageUrl, setEditImageUrl] = useState("");
+  const [editBadge, setEditBadge] = useState("");
+  const [editSortOrder, setEditSortOrder] = useState("10");
 
   const [categoryName, setCategoryName] = useState("");
   const [categorySlug, setCategorySlug] = useState("");
@@ -144,6 +169,7 @@ export default function AdminCatalogPage() {
     const { data: gameData, error: gameError } = await supabase
       .from("games")
       .select("*")
+      .order("sort_order", { ascending: true })
       .order("name", { ascending: true });
 
     if (gameError) {
@@ -196,6 +222,9 @@ export default function AdminCatalogPage() {
     setEditDescription(game.description ?? "");
     setEditTagLabel(game.tag_label ?? "Player ID");
     setEditTagPlaceholder(game.tag_placeholder ?? "Enter player ID");
+    setEditImageUrl(game.image_url ?? "");
+    setEditBadge(game.badge ?? "");
+    setEditSortOrder(String(game.sort_order ?? 10));
   }
 
   function cancelEditGame() {
@@ -206,6 +235,9 @@ export default function AdminCatalogPage() {
     setEditDescription("");
     setEditTagLabel("");
     setEditTagPlaceholder("");
+    setEditImageUrl("");
+    setEditBadge("");
+    setEditSortOrder("10");
   }
 
   function startEditCategory(category: CategoryRow) {
@@ -247,6 +279,9 @@ export default function AdminCatalogPage() {
       description: description.trim() || null,
       tag_label: tagLabel.trim() || "Player ID",
       tag_placeholder: tagPlaceholder.trim() || "Enter player ID",
+      image_url: imageUrl.trim() || null,
+      badge: badge.trim() || null,
+      sort_order: Number(sortOrder) || 10,
       is_active: true,
     });
 
@@ -277,7 +312,7 @@ export default function AdminCatalogPage() {
     }
 
     setMessage(
-      `Added ${cleanName}. Accounts, Offers, and Market were created automatically.`
+      `Added ${cleanName}. Accounts, Pins, Offers, and Market were created automatically.`
     );
 
     setGameName("");
@@ -286,6 +321,9 @@ export default function AdminCatalogPage() {
     setDescription("");
     setTagLabel("Player ID");
     setTagPlaceholder("Enter player ID");
+    setImageUrl("");
+    setBadge("");
+    setSortOrder("10");
     setSelectedGameSlug(cleanSlug);
 
     await loadCatalog();
@@ -315,6 +353,9 @@ export default function AdminCatalogPage() {
         description: editDescription.trim() || null,
         tag_label: editTagLabel.trim() || "Player ID",
         tag_placeholder: editTagPlaceholder.trim() || "Enter player ID",
+        image_url: editImageUrl.trim() || null,
+        badge: editBadge.trim() || null,
+        sort_order: Number(editSortOrder) || 10,
         updated_at: new Date().toISOString(),
       })
       .eq("id", game.id);
@@ -336,7 +377,15 @@ export default function AdminCatalogPage() {
         .update({ game: cleanSlug })
         .eq("game", oldSlug);
 
-      await supabase.from("orders").update({ game: cleanSlug }).eq("game", oldSlug);
+      await supabase
+        .from("orders")
+        .update({ game: cleanSlug })
+        .eq("game", oldSlug);
+
+      await supabase
+        .from("game_categories")
+        .update({ game_slug: cleanSlug })
+        .eq("game_slug", oldSlug);
     }
 
     setLoading(false);
@@ -522,6 +571,7 @@ export default function AdminCatalogPage() {
           <p className="mt-3 text-sm text-red-100">
             Only admins can manage games and categories.
           </p>
+
           <Link
             href="/dashboard"
             className="mt-6 inline-block rounded-xl bg-yellow-400 px-4 py-3 font-bold text-black"
@@ -545,20 +595,21 @@ export default function AdminCatalogPage() {
             <Link href="/admin" className="text-zinc-300 hover:text-white">
               Admin Orders
             </Link>
+
             <Link
               href="/admin/products"
               className="text-zinc-300 hover:text-white"
             >
               Products
             </Link>
+
             <Link href="/admin/catalog" className="text-yellow-300">
               Catalog
             </Link>
 
             <Link href="/admin/users" className="text-zinc-300 hover:text-white">
-                Users
+              Users
             </Link>
-
 
             <Link href="/dashboard" className="text-zinc-300 hover:text-white">
               Dashboard
@@ -570,8 +621,8 @@ export default function AdminCatalogPage() {
           <p className="text-sm font-semibold text-yellow-300">Admin Catalog</p>
           <h1 className="mt-2 text-4xl font-black">Games and Categories</h1>
           <p className="mt-3 max-w-2xl text-zinc-400">
-            Add and edit games or categories without changing code. New games
-            automatically get Accounts, Offers, and Market.
+            Add games manually, upload images, control badges, and manage game
+            categories without editing code.
           </p>
         </header>
 
@@ -591,7 +642,8 @@ export default function AdminCatalogPage() {
           <section className="rounded-3xl border border-zinc-800 bg-zinc-950 p-6">
             <h2 className="text-2xl font-bold">Add Game</h2>
             <p className="mt-2 text-sm text-zinc-400">
-              Example: Mobile Legends, Roblox, Clash of Clans, PUBG Mobile.
+              Add a game once here. It can then appear in your navbar dropdown
+              and product manager.
             </p>
 
             <form onSubmit={addGame} className="mt-6 grid gap-4">
@@ -599,28 +651,53 @@ export default function AdminCatalogPage() {
                 label="Game Name"
                 value={gameName}
                 onChange={updateGameName}
-                placeholder="e.g. Mobile Legends"
+                placeholder="e.g. Brawl Stars"
               />
 
               <TextField
                 label="Slug"
                 value={gameSlug}
                 onChange={(value) => setGameSlug(makeSlug(value))}
-                placeholder="e.g. mobile_legends"
+                placeholder="e.g. brawl_stars"
               />
 
-              <TextField
-                label="Short Name"
-                value={shortName}
-                onChange={setShortName}
-                placeholder="e.g. ML"
-              />
+              <div className="grid gap-4 md:grid-cols-2">
+                <TextField
+                  label="Short Name"
+                  value={shortName}
+                  onChange={setShortName}
+                  placeholder="e.g. BS"
+                />
+
+                <TextField
+                  label="Sort Order"
+                  value={sortOrder}
+                  onChange={setSortOrder}
+                  placeholder="e.g. 10"
+                />
+              </div>
 
               <TextAreaField
                 label="Description"
                 value={description}
                 onChange={setDescription}
                 placeholder="Short description for this game."
+              />
+
+              <ImageUploadField
+                label="Game Image"
+                value={imageUrl}
+                onChange={setImageUrl}
+                folder="games"
+                placeholderIcon="🎮"
+                previewClassName="h-52"
+              />
+
+              <TextField
+                label="Badge"
+                value={badge}
+                onChange={setBadge}
+                placeholder="e.g. NEW, POPULAR, HOT"
               />
 
               <div className="grid gap-4 md:grid-cols-2">
@@ -651,8 +728,8 @@ export default function AdminCatalogPage() {
           <section className="rounded-3xl border border-zinc-800 bg-zinc-950 p-6">
             <h2 className="text-2xl font-bold">Add Category</h2>
             <p className="mt-2 text-sm text-zinc-400">
-              Add extra categories to a game. Accounts, Offers, and Market are
-              auto-created.
+              Add extra categories to a game. Accounts, Pins, Offers, and Market
+              are auto-created when a new game is added.
             </p>
 
             <form onSubmit={addCategory} className="mt-6 grid gap-4">
@@ -660,6 +737,7 @@ export default function AdminCatalogPage() {
                 <span className="text-sm font-semibold text-zinc-300">
                   Select Game
                 </span>
+
                 <select
                   className="mt-2 w-full rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm outline-none focus:border-yellow-400"
                   value={selectedGameSlug}
@@ -716,7 +794,7 @@ export default function AdminCatalogPage() {
             <div>
               <h2 className="text-2xl font-bold">Existing Games</h2>
               <p className="mt-2 text-sm text-zinc-400">
-                Edit game details or toggle active/inactive.
+                Edit game image, badge, order, details, or active status.
               </p>
             </div>
 
@@ -754,18 +832,43 @@ export default function AdminCatalogPage() {
                         placeholder="game_slug"
                       />
 
-                      <TextField
-                        label="Short Name"
-                        value={editShortName}
-                        onChange={setEditShortName}
-                        placeholder="Short name"
-                      />
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <TextField
+                          label="Short Name"
+                          value={editShortName}
+                          onChange={setEditShortName}
+                          placeholder="Short name"
+                        />
+
+                        <TextField
+                          label="Sort Order"
+                          value={editSortOrder}
+                          onChange={setEditSortOrder}
+                          placeholder="10"
+                        />
+                      </div>
 
                       <TextAreaField
                         label="Description"
                         value={editDescription}
                         onChange={setEditDescription}
                         placeholder="Description"
+                      />
+
+                      <ImageUploadField
+                        label="Game Image"
+                        value={editImageUrl}
+                        onChange={setEditImageUrl}
+                        folder="games"
+                        placeholderIcon="🎮"
+                        previewClassName="h-52"
+                      />
+
+                      <TextField
+                        label="Badge"
+                        value={editBadge}
+                        onChange={setEditBadge}
+                        placeholder="e.g. NEW, POPULAR, HOT"
                       />
 
                       <TextField
@@ -804,15 +907,44 @@ export default function AdminCatalogPage() {
                   ) : (
                     <>
                       <div className="flex items-start justify-between gap-4">
-                        <div>
-                          <h3 className="text-xl font-bold">{game.name}</h3>
-                          <p className="mt-1 text-sm text-zinc-500">
-                            {game.slug}
-                          </p>
+                        <div className="flex min-w-0 items-center gap-3">
+                          {game.image_url ? (
+                            <img
+                              src={game.image_url}
+                              alt={game.name}
+                              className="h-14 w-14 shrink-0 rounded-xl object-cover ring-1 ring-zinc-800"
+                            />
+                          ) : (
+                            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-zinc-800 text-sm font-black text-yellow-300">
+                              {getInitials(game.name)}
+                            </div>
+                          )}
+
+                          <div className="min-w-0">
+                            <h3 className="truncate text-xl font-bold">
+                              {game.name}
+                            </h3>
+
+                            <p className="mt-1 truncate text-sm text-zinc-500">
+                              {game.slug}
+                            </p>
+
+                            <div className="mt-2 flex flex-wrap items-center gap-2">
+                              {game.badge && (
+                                <span className="rounded-full bg-yellow-400/10 px-2 py-1 text-xs font-bold text-yellow-300">
+                                  {game.badge}
+                                </span>
+                              )}
+
+                              <span className="rounded-full bg-zinc-800 px-2 py-1 text-xs font-bold text-zinc-400">
+                                Order: {game.sort_order ?? 10}
+                              </span>
+                            </div>
+                          </div>
                         </div>
 
                         <span
-                          className={`rounded-full px-3 py-1 text-xs font-bold ${
+                          className={`shrink-0 rounded-full px-3 py-1 text-xs font-bold ${
                             game.is_active
                               ? "bg-green-400/10 text-green-300"
                               : "bg-red-400/10 text-red-300"
@@ -943,6 +1075,7 @@ export default function AdminCatalogPage() {
                       <div className="flex items-start justify-between gap-4">
                         <div>
                           <h3 className="text-xl font-bold">{category.name}</h3>
+
                           <p className="mt-1 text-sm text-zinc-500">
                             {category.slug}
                           </p>
@@ -1024,6 +1157,7 @@ function TextField({
   return (
     <label className="block">
       <span className="text-sm font-semibold text-zinc-300">{label}</span>
+
       <input
         className="mt-2 w-full rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm outline-none focus:border-yellow-400"
         value={value}
@@ -1048,6 +1182,7 @@ function TextAreaField({
   return (
     <label className="block">
       <span className="text-sm font-semibold text-zinc-300">{label}</span>
+
       <textarea
         className="mt-2 min-h-24 w-full rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm outline-none focus:border-yellow-400"
         value={value}

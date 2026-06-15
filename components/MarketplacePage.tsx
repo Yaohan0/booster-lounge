@@ -4,19 +4,42 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabaseClient";
-import GameSwitcher from "@/components/GameSwitcher";
-import {
-  GameKey,
-  gameHref,
-  getGameFromSearchParams,
-  games,
-} from "@/lib/games";
 
 type ProductCategory = "accounts" | "pins" | "offers" | "market";
 
+type GameRow = {
+  id: string;
+  slug: string;
+  name: string;
+  short_name: string | null;
+  description: string | null;
+  tag_label: string | null;
+  tag_placeholder: string | null;
+  image_url?: string | null;
+  badge?: string | null;
+  sort_order?: number | null;
+  is_active: boolean;
+};
+
+type CategoryRow = {
+  id: string;
+  game_slug: string;
+  slug: ProductCategory | string;
+  name: string;
+  description: string | null;
+  is_active: boolean;
+  sort_order: number | null;
+  instructions_title?: string | null;
+  instructions_body?: string | null;
+  required_information?: string | null;
+  delivery_time?: string | null;
+  top_up_method?: string | null;
+  applicable_server?: string | null;
+};
+
 type Product = {
   id: string;
-  game: GameKey | null;
+  game: string | null;
   category: ProductCategory;
   title: string;
   description: string | null;
@@ -63,17 +86,17 @@ const popularSearches: Record<ProductCategory, string[]> = {
     "Bundle",
     "Limited",
     "Discount",
-    "Pins",
     "Starter",
+    "Limited Offer",
   ],
   market: [
-    "In-game Items",
-    "Finger Sleeves",
-    "Keychains",
-    "Accessories",
-    "Ready Stock",
-    "Preorder",
+    "Diamonds",
+    "Top-Up",
     "Bundle",
+    "Recharge",
+    "Membership",
+    "Weekly Pass",
+    "Monthly Pass",
   ],
 };
 
@@ -81,27 +104,41 @@ const categoryLabels: Record<ProductCategory, string> = {
   accounts: "Account Purchase",
   pins: "Exclusive Pins",
   offers: "Special Offer",
-  market: "Market Purchase",
+  market: "Top-Up Purchase",
 };
 
 const categoryIcons: Record<ProductCategory, string> = {
   accounts: "🎮",
   pins: "📌",
   offers: "🔥",
-  market: "🛒",
+  market: "💎",
 };
 
 const addListingLabels: Record<ProductCategory, string> = {
   accounts: "Add Account Listing",
   pins: "Add Pin Listing",
   offers: "Add Offer Listing",
-  market: "Add Market Item",
+  market: "Add Top-Up Item",
 };
 
-const marketTypes = ["All", "In-game Items", "Finger Sleeves", "Keychains"];
+const marketTypes = [
+  "All",
+  "Diamonds",
+  "Top-Up",
+  "Bundle",
+  "Membership",
+  "Weekly Pass",
+  "Monthly Pass",
+];
 
-function productManagerHref(category: ProductCategory, game: GameKey) {
-  return `/admin/products?category=${category}&game=${game}`;
+function gameHref(path: string, gameSlug: string) {
+  return `${path}?game=${encodeURIComponent(gameSlug)}`;
+}
+
+function productManagerHref(category: ProductCategory, gameSlug: string) {
+  return `/admin/products?category=${category}&game=${encodeURIComponent(
+    gameSlug
+  )}`;
 }
 
 function buildWhatsAppUrl(product: Product, gameLabel: string) {
@@ -118,6 +155,15 @@ function buildWhatsAppUrl(product: Product, gameLabel: string) {
   return `https://wa.me/${phone}?text=${message}`;
 }
 
+function displayCategoryName(category: ProductCategory, categoryInfo?: CategoryRow) {
+  if (categoryInfo?.name) return categoryInfo.name;
+  if (category === "market") return "Top-Up";
+  if (category === "accounts") return "Accounts";
+  if (category === "offers") return "Offers";
+  if (category === "pins") return "Pins";
+  return category;
+}
+
 export default function MarketplacePage({
   category,
   title,
@@ -128,8 +174,12 @@ export default function MarketplacePage({
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const selectedGame = getGameFromSearchParams(searchParams);
-  const gameConfig = games[selectedGame];
+  const requestedGameSlug = searchParams.get("game") || "brawl_stars";
+
+  const [games, setGames] = useState<GameRow[]>([]);
+  const [selectedGame, setSelectedGame] = useState<GameRow | null>(null);
+  const [categories, setCategories] = useState<CategoryRow[]>([]);
+  const [categoryInfo, setCategoryInfo] = useState<CategoryRow | null>(null);
 
   const [products, setProducts] = useState<Product[]>([]);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
@@ -138,60 +188,123 @@ export default function MarketplacePage({
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState("recommended");
   const [loading, setLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState("");
 
   const [minPrice, setMinPrice] = useState("");
   const [maxPrice, setMaxPrice] = useState("");
   const [quickPrice, setQuickPrice] = useState("");
   const [marketTypeFilter, setMarketTypeFilter] = useState("All");
 
-  const categoryAllowed = gameConfig.categories.includes(category);
+  const selectedGameSlug = selectedGame?.slug || requestedGameSlug;
+  const selectedGameName = selectedGame?.name || "Selected Game";
+  const selectedGameDescription =
+    selectedGame?.description || "Browse listings for this game.";
+  const categoryAllowed = Boolean(categoryInfo);
 
   useEffect(() => {
-    async function loadMarketplace() {
-      setLoading(true);
+    loadMarketplace();
+  }, [requestedGameSlug, category]);
 
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+  async function loadMarketplace() {
+    setLoading(true);
+    setErrorMessage("");
 
-      if (user) {
-        const { data: profile } = await supabase
-          .from("profiles")
-          .select("role")
-          .eq("id", user.id)
-          .single();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
 
-        setIsAdmin(profile?.role === "admin");
-      } else {
-        setIsAdmin(false);
-      }
+    if (user) {
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", user.id)
+        .single();
 
-      if (!categoryAllowed) {
-        setProducts([]);
-        setLoading(false);
-        return;
-      }
-
-      const { data, error } = await supabase
-        .from("products")
-        .select("*")
-        .eq("game", selectedGame)
-        .eq("category", category)
-        .eq("is_active", true)
-        .order("created_at", { ascending: false });
-
-      if (error) {
-        alert(error.message);
-        setLoading(false);
-        return;
-      }
-
-      setProducts((data ?? []) as Product[]);
-      setLoading(false);
+      setIsAdmin(profile?.role === "admin");
+    } else {
+      setIsAdmin(false);
     }
 
-    loadMarketplace();
-  }, [category, categoryAllowed, selectedGame, supabase]);
+    const { data: gameData, error: gameError } = await supabase
+      .from("games")
+      .select("*")
+      .eq("is_active", true)
+      .order("sort_order", { ascending: true })
+      .order("name", { ascending: true });
+
+    if (gameError) {
+      setErrorMessage(gameError.message);
+      setProducts([]);
+      setLoading(false);
+      return;
+    }
+
+    const loadedGames = (gameData ?? []) as GameRow[];
+    setGames(loadedGames);
+
+    const matchedGame =
+      loadedGames.find((game) => game.slug === requestedGameSlug) ??
+      loadedGames.find((game) => game.slug === "brawl_stars") ??
+      loadedGames[0] ??
+      null;
+
+    setSelectedGame(matchedGame);
+
+    if (!matchedGame) {
+      setCategories([]);
+      setCategoryInfo(null);
+      setProducts([]);
+      setErrorMessage("No active games found.");
+      setLoading(false);
+      return;
+    }
+
+    const { data: categoryData, error: categoryError } = await supabase
+      .from("game_categories")
+      .select("*")
+      .eq("game_slug", matchedGame.slug)
+      .eq("is_active", true)
+      .order("sort_order", { ascending: true });
+
+    if (categoryError) {
+      setErrorMessage(categoryError.message);
+      setProducts([]);
+      setLoading(false);
+      return;
+    }
+
+    const loadedCategories = (categoryData ?? []) as CategoryRow[];
+    setCategories(loadedCategories);
+
+    const matchedCategory =
+      loadedCategories.find((item) => item.slug === category) ?? null;
+
+    setCategoryInfo(matchedCategory);
+
+    if (!matchedCategory) {
+      setProducts([]);
+      setLoading(false);
+      return;
+    }
+
+    const { data: productData, error: productError } = await supabase
+      .from("products")
+      .select("*")
+      .eq("game", matchedGame.slug)
+      .eq("category", category)
+      .eq("is_active", true)
+      .order("created_at", { ascending: false });
+
+    if (productError) {
+      setErrorMessage(productError.message);
+      setProducts([]);
+      setLoading(false);
+      return;
+    }
+
+    setProducts((productData ?? []) as Product[]);
+    setLoading(false);
+  }
 
   function matchesPrice(product: Product) {
     const price = Number(product.price ?? 0);
@@ -222,6 +335,8 @@ export default function MarketplacePage({
   }
 
   async function requestProduct(product: Product) {
+    if (!selectedGame) return;
+
     const {
       data: { user },
     } = await supabase.auth.getUser();
@@ -241,14 +356,16 @@ export default function MarketplacePage({
       alert(
         "Admins manage listings from the Product Manager. Admins cannot submit purchase requests."
       );
-      router.push(productManagerHref(category, selectedGame));
+      router.push(productManagerHref(category, selectedGame.slug));
       return;
     }
 
+    const categoryName = displayCategoryName(category, categoryInfo ?? undefined);
+
     const notes = [
       `Product Request: ${product.title}`,
-      `Game: ${gameConfig.label}`,
-      `Category: ${category}`,
+      `Game: ${selectedGame.name}`,
+      `Category: ${categoryName}`,
       `Price: SGD${Number(product.price ?? 0).toFixed(2)}`,
       `Delivery: ${product.delivery_time || "Manual review"}`,
       `Image URL: ${product.image_url || "N/A"}`,
@@ -263,8 +380,8 @@ export default function MarketplacePage({
 
     const { error } = await supabase.from("order_requests").insert({
       user_id: user.id,
-      game: selectedGame,
-      service_type: `${gameConfig.label} ${categoryLabels[category]}`,
+      game: selectedGame.slug,
+      service_type: `${selectedGame.name} ${categoryLabels[category]}`,
       current_rank: product.title,
       target_rank: `SGD${Number(product.price ?? 0).toFixed(2)}`,
       notes,
@@ -311,29 +428,31 @@ export default function MarketplacePage({
       return 0;
     });
 
+  const pageTitle =
+    category === "market" ? "Top-Up" : displayCategoryName(category, categoryInfo ?? undefined);
+
   return (
     <main className="min-h-screen bg-[#08080b] text-white">
       <nav className="border-b border-zinc-900 bg-[#0b0b10]/90">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-5">
-          <Link
-            href={gameHref("/", selectedGame)}
-            className="text-2xl font-bold text-yellow-400"
-          >
+          <Link href="/games" className="text-2xl font-bold text-yellow-400">
             Booster Lounge
           </Link>
 
           <div className="hidden items-center gap-6 text-sm text-zinc-300 md:flex">
-            <GameSwitcher />
+            <Link href="/games" className="hover:text-white">
+              Games
+            </Link>
 
             <Link
-              href={gameHref("/services", selectedGame)}
+              href={gameHref("/services", selectedGameSlug)}
               className="hover:text-white"
             >
               Services
             </Link>
 
             <Link
-              href={gameHref("/accounts", selectedGame)}
+              href={gameHref("/accounts", selectedGameSlug)}
               className={
                 category === "accounts" ? "text-yellow-300" : "hover:text-white"
               }
@@ -341,9 +460,9 @@ export default function MarketplacePage({
               Accounts
             </Link>
 
-            {gameConfig.categories.includes("pins") && (
+            {categories.some((item) => item.slug === "pins") && (
               <Link
-                href={gameHref("/pins", selectedGame)}
+                href={gameHref("/pins", selectedGameSlug)}
                 className={
                   category === "pins" ? "text-yellow-300" : "hover:text-white"
                 }
@@ -353,7 +472,7 @@ export default function MarketplacePage({
             )}
 
             <Link
-              href={gameHref("/offers", selectedGame)}
+              href={gameHref("/offers", selectedGameSlug)}
               className={
                 category === "offers" ? "text-yellow-300" : "hover:text-white"
               }
@@ -362,12 +481,12 @@ export default function MarketplacePage({
             </Link>
 
             <Link
-              href={gameHref("/market", selectedGame)}
+              href={gameHref("/market", selectedGameSlug)}
               className={
                 category === "market" ? "text-yellow-300" : "hover:text-white"
               }
             >
-              Market
+              Top-Up
             </Link>
 
             <Link href="/dashboard" className="hover:text-white">
@@ -381,7 +500,7 @@ export default function MarketplacePage({
                 </Link>
 
                 <Link
-                  href={`/admin/products?category=${category}&game=${selectedGame}`}
+                  href={`/admin/products?category=${category}&game=${selectedGameSlug}`}
                   className="text-yellow-300 hover:text-white"
                 >
                   Product Manager
@@ -393,7 +512,7 @@ export default function MarketplacePage({
           <Link
             href={
               isAdmin
-                ? `/admin/products?category=${category}&game=${selectedGame}`
+                ? `/admin/products?category=${category}&game=${selectedGameSlug}`
                 : "/dashboard"
             }
             className="rounded-xl bg-yellow-400 px-4 py-2 text-sm font-bold text-black hover:bg-yellow-300"
@@ -413,16 +532,23 @@ export default function MarketplacePage({
             <div className="mt-6 rounded-2xl border border-zinc-800 bg-zinc-900/80 p-4">
               <p className="text-sm text-zinc-500">Selected Game</p>
               <p className="mt-1 font-bold text-yellow-300">
-                {gameConfig.label}
+                {selectedGameName}
               </p>
               <p className="mt-2 text-xs leading-5 text-zinc-500">
-                {gameConfig.description}
+                {selectedGameDescription}
               </p>
+
+              <Link
+                href="/games"
+                className="mt-4 inline-flex rounded-xl border border-yellow-400/40 px-4 py-2 text-sm font-bold text-yellow-300 hover:bg-yellow-400/10"
+              >
+                Change Game
+              </Link>
             </div>
 
             {category === "market" && (
               <div className="mt-8 border-t border-zinc-800 pt-6">
-                <h3 className="font-bold">Market Type</h3>
+                <h3 className="font-bold">Top-Up Type</h3>
 
                 <div className="mt-4 space-y-3 text-sm text-zinc-300">
                   {marketTypes.map((type) => (
@@ -524,30 +650,41 @@ export default function MarketplacePage({
             <div className="flex flex-col justify-between gap-5 md:flex-row md:items-start">
               <div>
                 <p className="text-sm font-bold text-yellow-300">
-                  {gameConfig.label}
+                  {selectedGameName}
                 </p>
 
-                <h1 className="mt-2 text-4xl font-bold">{title}</h1>
-                <p className="mt-3 max-w-2xl text-zinc-400">{subtitle}</p>
+                <h1 className="mt-2 text-4xl font-bold">
+                  {category === "market" ? "Top-Up" : title || pageTitle}
+                </h1>
 
-                {!categoryAllowed && (
+                <p className="mt-3 max-w-2xl text-zinc-400">
+                  {categoryInfo?.description || subtitle}
+                </p>
+
+                {errorMessage && (
                   <div className="mt-4 rounded-2xl border border-red-400/40 bg-red-400/10 p-4 text-sm text-red-200">
-                    This category is not enabled for {gameConfig.label}.
+                    {errorMessage}
+                  </div>
+                )}
+
+                {!loading && !categoryAllowed && (
+                  <div className="mt-4 rounded-2xl border border-red-400/40 bg-red-400/10 p-4 text-sm text-red-200">
+                    This category is not enabled for {selectedGameName}.
                   </div>
                 )}
 
                 {category === "market" && categoryAllowed && (
                   <div className="mt-4 rounded-2xl border border-yellow-400/40 bg-yellow-400/10 p-4 text-sm text-yellow-200">
-                    Market products can be requested through the dashboard or
-                    contacted through WhatsApp.
+                    Top-up products can be requested through the dashboard or
+                    contacted through WhatsApp. Do not submit account passwords,
+                    email access, 2FA codes, or recovery details.
                   </div>
                 )}
 
                 {isAdmin && categoryAllowed && (
                   <div className="mt-4 rounded-2xl border border-yellow-400/40 bg-yellow-400/10 p-4 text-sm text-yellow-200">
                     Admin mode: requests are disabled here. Use Product Manager
-                    to add, edit, hide, or delete listings for{" "}
-                    {gameConfig.label}.
+                    to add, edit, hide, or delete listings for {selectedGameName}.
                   </div>
                 )}
               </div>
@@ -555,7 +692,7 @@ export default function MarketplacePage({
               <div className="flex flex-col gap-3 sm:flex-row">
                 {isAdmin && categoryAllowed && (
                   <Link
-                    href={productManagerHref(category, selectedGame)}
+                    href={productManagerHref(category, selectedGameSlug)}
                     className="rounded-xl bg-yellow-400 px-5 py-3 text-center text-sm font-bold text-black hover:bg-yellow-300"
                   >
                     {addListingLabels[category]}
@@ -613,9 +750,9 @@ export default function MarketplacePage({
                       key={product.id}
                       product={product}
                       category={category}
-                      gameLabel={gameConfig.label}
+                      gameLabel={selectedGameName}
                       isAdmin={isAdmin}
-                      selectedGame={selectedGame}
+                      selectedGameSlug={selectedGameSlug}
                       onOpen={() => setSelectedProduct(product)}
                       onRequest={() => requestProduct(product)}
                     />
@@ -623,11 +760,11 @@ export default function MarketplacePage({
 
                   {!loading && filteredProducts.length === 0 && (
                     <div className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-6 text-zinc-400">
-                      <p>No listings found for {gameConfig.label}.</p>
+                      <p>No listings found for {selectedGameName}.</p>
 
                       {isAdmin && (
                         <Link
-                          href={productManagerHref(category, selectedGame)}
+                          href={productManagerHref(category, selectedGameSlug)}
                           className="mt-4 inline-flex rounded-xl bg-yellow-400 px-5 py-3 text-sm font-bold text-black hover:bg-yellow-300"
                         >
                           {addListingLabels[category]}
@@ -636,6 +773,13 @@ export default function MarketplacePage({
                     </div>
                   )}
                 </div>
+
+                {category === "market" && (
+                  <TopUpInstructions
+                    gameName={selectedGameName}
+                    categoryInfo={categoryInfo}
+                  />
+                )}
               </>
             )}
           </section>
@@ -646,8 +790,8 @@ export default function MarketplacePage({
         <ProductDetailsModal
           product={selectedProduct}
           category={category}
-          gameLabel={gameConfig.label}
-          selectedGame={selectedGame}
+          gameLabel={selectedGameName}
+          selectedGameSlug={selectedGameSlug}
           isAdmin={isAdmin}
           onClose={() => setSelectedProduct(null)}
           onRequest={() => requestProduct(selectedProduct)}
@@ -662,7 +806,7 @@ function ProductCard({
   category,
   gameLabel,
   isAdmin,
-  selectedGame,
+  selectedGameSlug,
   onOpen,
   onRequest,
 }: {
@@ -670,7 +814,7 @@ function ProductCard({
   category: ProductCategory;
   gameLabel: string;
   isAdmin: boolean;
-  selectedGame: GameKey;
+  selectedGameSlug: string;
   onOpen: () => void;
   onRequest: () => void;
 }) {
@@ -757,14 +901,14 @@ function ProductCard({
           {isAdmin ? (
             <div className="flex flex-col gap-2">
               <Link
-                href={productManagerHref(category, selectedGame)}
+                href={productManagerHref(category, selectedGameSlug)}
                 className="rounded-xl bg-zinc-800 px-4 py-2 text-center text-sm font-bold text-white hover:bg-zinc-700"
               >
                 Manage
               </Link>
 
               <Link
-                href={productManagerHref(category, selectedGame)}
+                href={productManagerHref(category, selectedGameSlug)}
                 className="rounded-xl bg-yellow-400 px-4 py-2 text-center text-sm font-bold text-black hover:bg-yellow-300"
               >
                 Add
@@ -808,7 +952,7 @@ function ProductDetailsModal({
   product,
   category,
   gameLabel,
-  selectedGame,
+  selectedGameSlug,
   isAdmin,
   onClose,
   onRequest,
@@ -816,7 +960,7 @@ function ProductDetailsModal({
   product: Product;
   category: ProductCategory;
   gameLabel: string;
-  selectedGame: GameKey;
+  selectedGameSlug: string;
   isAdmin: boolean;
   onClose: () => void;
   onRequest: () => void;
@@ -863,24 +1007,6 @@ function ProductDetailsModal({
                 </div>
               )}
             </div>
-
-            {product.rank_icon_url &&
-              category !== "accounts" &&
-              category !== "market" && (
-                <div className="mt-4 flex items-center gap-3 rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
-                  <img
-                    src={product.rank_icon_url}
-                    alt="Icon"
-                    className="h-16 w-16 rounded-xl object-cover"
-                  />
-                  <div>
-                    <p className="font-semibold">Listing Icon</p>
-                    <p className="text-sm text-zinc-500">
-                      Extra visual icon uploaded by admin.
-                    </p>
-                  </div>
-                </div>
-              )}
           </div>
 
           <div className="rounded-2xl border border-zinc-800 bg-zinc-900/70 p-5">
@@ -935,7 +1061,7 @@ function ProductDetailsModal({
             <div className="mt-6 grid gap-3">
               {isAdmin ? (
                 <Link
-                  href={productManagerHref(category, selectedGame)}
+                  href={productManagerHref(category, selectedGameSlug)}
                   className="rounded-xl bg-yellow-400 px-4 py-3 text-center text-sm font-bold text-black hover:bg-yellow-300"
                 >
                   Manage This Listing
@@ -976,6 +1102,115 @@ function ProductDetailsModal({
             </p>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function TopUpInstructions({
+  gameName,
+  categoryInfo,
+}: {
+  gameName: string;
+  categoryInfo: CategoryRow | null;
+}) {
+  const title = categoryInfo?.instructions_title || `${gameName} Top-Up Instructions`;
+
+  const body =
+    categoryInfo?.instructions_body ||
+    `Enter the required account information correctly before submitting your top-up request. Admin will review and process it after confirmation.`;
+
+  return (
+    <section className="mt-12 rounded-3xl border border-zinc-800 bg-zinc-950 p-6">
+      <h2 className="text-2xl font-black">Top-up instructions</h2>
+
+      <p className="mt-5 text-sm leading-7 text-zinc-300">
+        <span className="font-bold text-red-300">{body}</span>
+      </p>
+
+      <h3 className="mt-8 text-xl font-bold">{title}</h3>
+
+      <div className="mt-5 overflow-hidden rounded-2xl border border-zinc-800">
+        <InstructionRow
+          label="Applicable Platform"
+          value="Mobile game"
+          muted={false}
+        />
+
+        <InstructionRow
+          label="Applicable Server"
+          value={categoryInfo?.applicable_server || "Global / Manual review"}
+          muted
+        />
+
+        <InstructionRow
+          label="Top-Up Method"
+          value={categoryInfo?.top_up_method || "Manual Top-Up"}
+          muted={false}
+        />
+
+        <InstructionRow
+          label="Required Information"
+          value={categoryInfo?.required_information || "Player ID / User ID"}
+          highlight
+          muted
+        />
+
+        <InstructionRow
+          label="Delivery Time"
+          value={categoryInfo?.delivery_time || "Manual review"}
+          muted={false}
+        />
+      </div>
+
+      <div className="mt-8">
+        <p className="text-lg font-bold text-red-300">Note:</p>
+
+        <ol className="mt-4 list-decimal space-y-4 pl-5 text-sm leading-7 text-zinc-400">
+          <li>
+            Please accurately fill in the required information to avoid mistakes
+            in your purchase.
+          </li>
+          <li>
+            Wrong player ID, server ID, UID, or tag may delay or fail the top-up.
+          </li>
+          <li>
+            Never provide passwords, email access, 2FA codes, or recovery
+            details.
+          </li>
+        </ol>
+      </div>
+    </section>
+  );
+}
+
+function InstructionRow({
+  label,
+  value,
+  highlight = false,
+  muted = false,
+}: {
+  label: string;
+  value: string;
+  highlight?: boolean;
+  muted?: boolean;
+}) {
+  return (
+    <div
+      className={`grid grid-cols-1 border-b border-zinc-800 last:border-b-0 md:grid-cols-2 ${
+        muted ? "bg-zinc-900/60" : "bg-zinc-950"
+      }`}
+    >
+      <div className="border-r border-zinc-800 px-4 py-4 font-bold text-zinc-100">
+        {label}
+      </div>
+
+      <div
+        className={`px-4 py-4 ${
+          highlight ? "font-bold text-red-300" : "text-zinc-300"
+        }`}
+      >
+        {value}
       </div>
     </div>
   );
