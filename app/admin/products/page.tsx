@@ -1,20 +1,19 @@
 "use client";
 
-import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabaseClient";
 import AdminProductManager from "@/components/AdminProductManager";
+import { createClient } from "@/lib/supabaseClient";
+import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
 
 export default function AdminProductsPage() {
   const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
 
-  const [allowed, setAllowed] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [checkingAdmin, setCheckingAdmin] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
-    async function checkAdminAccess() {
+    async function checkAdmin() {
       const {
         data: { user },
       } = await supabase.auth.getUser();
@@ -30,96 +29,49 @@ export default function AdminProductsPage() {
         .eq("id", user.id)
         .single();
 
-      if (error || profile?.role !== "admin") {
-        router.push("/dashboard");
+      if (error) {
+        setIsAdmin(false);
+        setCheckingAdmin(false);
         return;
       }
 
-      setAllowed(true);
-      setLoading(false);
+      if (profile?.role !== "admin") {
+        setIsAdmin(false);
+        setCheckingAdmin(false);
+        return;
+      }
+
+      setIsAdmin(true);
+      setCheckingAdmin(false);
     }
 
-    checkAdminAccess();
+    checkAdmin();
   }, [router, supabase]);
 
-  if (loading || !allowed) {
+  if (checkingAdmin) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-zinc-950 text-white">
-        <div className="rounded-2xl border border-zinc-800 bg-zinc-900 p-6 text-zinc-300">
-          Checking admin access...
-        </div>
+      <main className="flex min-h-screen items-center justify-center bg-[#08080b] text-white">
+        Checking admin access...
+      </main>
+    );
+  }
+
+  if (!isAdmin) {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[#08080b] px-6 text-white">
+        <section className="max-w-md rounded-3xl border border-red-400/30 bg-red-400/10 p-8 text-center">
+          <h1 className="text-2xl font-bold text-red-300">Access denied</h1>
+          <p className="mt-3 text-sm text-red-100">
+            Only admins can manage products.
+          </p>
+        </section>
       </main>
     );
   }
 
   return (
-    <main className="min-h-screen bg-[radial-gradient(circle_at_top,_#27272a,_#09090b_55%)] px-6 py-8 text-white">
-      <section className="mx-auto max-w-6xl">
-        <nav className="mb-8 flex flex-col gap-4 rounded-2xl border border-zinc-800 bg-zinc-950/70 px-5 py-4 backdrop-blur md:flex-row md:items-center md:justify-between">
-          <Link href="/" className="text-lg font-bold text-yellow-400">
-            Booster Lounge
-          </Link>
-
-          <div className="flex flex-wrap items-center gap-4 text-sm">
-            <Link href="/" className="text-zinc-300 hover:text-white">
-              Home
-            </Link>
-
-            <Link href="/services" className="text-zinc-300 hover:text-white">
-              Services
-            </Link>
-
-            <Link href="/accounts" className="text-zinc-300 hover:text-white">
-              Accounts
-            </Link>
-
-            <Link href="/pins" className="text-zinc-300 hover:text-white">
-              Pins
-            </Link>
-
-            <Link href="/offers" className="text-zinc-300 hover:text-white">
-              Offers
-            </Link>
-
-            <Link href="/market" className="text-zinc-300 hover:text-white">
-              Market
-            </Link>
-
-            <Link href="/admin" className="text-zinc-300 hover:text-white">
-              Orders Admin
-            </Link>
-            <Link href="/admin/users" className="text-zinc-300 hover:text-white">
-              Users
-            </Link>
-            <Link
-              href="/admin/products"
-              className="text-yellow-300 hover:text-white"
-            >
-              Product Manager
-            </Link>
-          </div>
-        </nav>
-
-        <header className="mb-8 flex flex-col justify-between gap-4 md:flex-row md:items-end">
-          <div>
-            <h1 className="text-4xl font-bold tracking-tight">
-              Product Manager
-            </h1>
-
-            <p className="mt-2 max-w-2xl text-zinc-400">
-              Create and manage marketplace listings separately from boosting
-              orders.
-            </p>
-          </div>
-
-          <Link
-            href="/admin"
-            className="rounded-xl border border-zinc-700 px-4 py-2 text-sm font-semibold text-zinc-200 hover:bg-zinc-900"
-          >
-            Back to Orders Admin
-          </Link>
-        </header>
-
+    <main className="min-h-screen bg-[#08080b] px-6 py-8 text-white">
+      <section className="mx-auto max-w-7xl">
         <AdminProductManager />
       </section>
     </main>
